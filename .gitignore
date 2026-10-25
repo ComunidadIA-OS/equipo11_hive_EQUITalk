@@ -1,0 +1,13 @@
+# Entorno virtual
+.env
+venv/
+.venv/
+env/
+
+# Python y Jupyter
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Datos pesados
+data/
