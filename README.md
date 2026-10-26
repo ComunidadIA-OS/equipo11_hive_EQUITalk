@@ -1,97 +1,128 @@
-# THE HIVE (Equipo 11) - Detector de Interrupciones
+# THE HIVE (Equipo 11) - Detector de Interrupciones y Evaluador
 
-Sistema en Python optimizado para procesar contenidos audiovisuales de voz, extraer transcripciones, diarizar hablantes, clasificar géneros mediante aprendizaje profundo y calcular métricas de equidad (tiempo de habla e interrupciones de género).
+Sistema en Python optimizado para procesar contenidos audiovisuales de voz, extraer transcripciones, diarizar hablantes y clasificar géneros mediante aprendizaje profundo. Incluye un módulo completo de evaluación para contrastar el rendimiento del modelo (ASR, Diarización, Clasificación) contra transcripciones de referencia (*Ground Truth* en formato `.trs`) y calcular métricas de equidad.
 
 ---
 
 ## Estructura del Proyecto
 ```text
 gender_voice_metrics/
-├── data/                   # Directorio de datos (raw, processed, ground_truth)
-│   └── agora/c003/         # Audios de prueba (.wav)
-├── src/                    # Código fuente modular
+├── data/
+│   ├── raw/
+│   │   ├── audio/          # Audios de prueba (.wav)
+│   │   └── trs/            # Archivos Ground Truth (.trs / XML)
+│   ├── interim/            # Transcripciones y predicciones generadas (.csv)
+│   └── processed/          # Resultados de evaluación finales (.xlsx)
+├── src/
 │   ├── pipeline/           # Procesamiento de audio y ejecución por lotes
-│   ├── metrics/            # Lógica de negocio y cálculo de KPIs
-│   ├── evaluation/         # Validación contra Ground Truth
-│   └── utils/              # Logger, excepciones y parches de compatibilidad
+│   ├── metrics/            # Lógica matemática (rendimiento IA y equidad)
+│   ├── evaluation/         # Validación contra Ground Truth (Batch Evaluator)
+│   └── utils/              # Parsers (XML/TRS), logger y excepciones
 ├── tests/                  # Pruebas unitarias e integración con pytest
-├── configs/                # Archivos de configuración (config.yaml)
+├── main.py                 # Orquestador principal 
 ├── requirements.txt        # Dependencias del sistema
-├── conftest.py             # Configuración de ruta global para pytest
 └── README.md
 ```
 ---
 
-## Configuración del entorno
+## Configuración del Entorno
 
 1. **Clonar el repositorio y crear un entorno virtual:**
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-
 ```
 
 2. **Instalar las dependencias del proyecto:**
+
 ```bash
 pip install -r requirements.txt
 ```
 
-3. **Configurar las credenciales de Hugging Face (Requerido para `pyannote.audio`):**
-Crea un archivo llamado `.env` en la raíz del proyecto y añade `HF_TOKEN=tu_token` en el archivo `.env`.
+3. **Configurar las credenciales de Hugging Face:**
+Crea un archivo llamado `.env` en la raíz del proyecto y añade el token necesario para el modelo de `pyannote.audio`:
+
+```text
+HF_TOKEN=tu_token_aqui
+```
+
+4. **Carga el token en la terminal con el comando correspondiente:**
+
+   * **Linux y macOS (Bash / Zsh):**
+     ```bash
+     export $(grep -v '^#' .env | xargs)
+     ```
+
+   * **Windows (PowerShell):**
+     ```powershell
+     Get-Content .env | Where-Object { $_ -match '=' -and -not$_.StartsWith('#') } | ForEach-Object {
+         $name, $value =$_.Split('=', 2)
+         [Environment]::SetEnvironmentVariable($name.Trim(),$value.Trim(), 'Process')
+     }
+     ```
+---
+
+## Uso del Sistema 
+
+El proyecto se orquesta ahora desde un punto de entrada centralizado (`main.py`) que permite ejecutar la inferencia mediante GPU y la evaluación posterior de forma consecutiva o aislada.
+
+1. **Ejecución del Pipeline Completo (Inferencia + Evaluación)**
+
+Ejecuta los modelos sobre los audios, genera los CSVs temporales y, a continuación, los cruza con los archivos `.trs` de referencia para exportar el Excel de métricas.
+
+```bash
+python main.py --audio_dir data/raw/audio --gt_dir data/raw/trs
+```
+
+2. **Evaluación Rápida (Saltar Inferencia)**
+
+Si ya tienes las predicciones `.csv` generadas en ejecuciones anteriores y solo necesitas recalcular el Excel de métricas (por ejemplo, si has ajustado el cálculo de solapamientos), usa el flag `--skip_inference`:
+
+```bash
+python main.py --audio_dir data/raw/audio --gt_dir data/raw/trs --skip_inference
+```
+
+**3. Configuración Avanzada de Parámetros**
+
+Puedes personalizar el número de GPUs concurrentes, los directorios de salida y el nombre del archivo final de Excel:
+
+```bash
+python main.py \
+    --audio_dir data/raw/agora \
+    --gt_dir data/raw/agora \
+    --pred_dir data/predictions \
+    --out_dir data/processed \
+    --out_filename metricas_agora_v1.xlsx \
+    --num_gpus 4
+```
+
+---
+
+## Métricas Exportadas
+
+El archivo Excel generado en `data/processed/` contiene las siguientes evaluaciones aplanadas por cada archivo de audio:
+
+* **Rendimiento del Modelo (IA):**
+* `ASR_WER` y `ASR_CER`: Word/Character Error Rate.
+* `DER (Diarization)`: Tasa de error en la identificación de turnos de hablantes.
+* `Gender_Accuracy / Sensitivity / Precision`: Rendimiento de la clasificación de género alineada temporalmente con el *Ground Truth*.
+
+* **Dinámicas de Equidad (Sociolingüística):**
+* `Time_Female_Pct` y `Time_Male_Pct`: Porcentaje de tiempo de uso de la palabra.
+* `Interruptions_M2F`: Conteo de interrupciones directas de hablantes masculinos hacia hablantes femeninas.
 
 ---
 
 ## Ejecución de Pruebas Unitarias
 
-Para validar que el pipeline de audio (`AudioProcessor`), los modelos neuronales y el esquema de datos funcionan correctamente en la GPU, ejecuta las pruebas mediante `pytest`:
-
+Para validar los módulos de forma aislada mediante `pytest`:
 ```bash
-python -m pytest tests/test_audio_processor.py -v -s
-```
----
-
-## Uso del Sistema
-
-### A. Procesamiento por Lotes (*Batch Processing*)
-
-Para procesar de forma concurrente todos los audios de un directorio distribuyéndolos de forma balanceada (*round-robin*) entre las 2 GPUs V100S:
-
-```python
-from src.utils.config_loader import load_config
-from src.pipeline.batch_runner import BatchRunner
-
-# Cargar configuración desde config.yaml
-config = load_config("configs/config.yaml")
-
-# Inicializar y ejecutar orquestador
-runner = BatchRunner(
-    input_dir="data/agora/c003",
-    output_dir="data/processed",
-    num_gpus=config["hardware"]["num_gpus"]
-)
-
-results = runner.run()
-print(results)
+python -m pytest tests/ -v -s
 ```
 
-### B. Cálculo de Métricas de Negocio
-
-Una vez generado el archivo CSV con las transcripciones y hablantes etiquetados, puedes calcular los KPIs de equidad e interrupciones en la CPU:
-
-```python
-import pandas as pd
-from src.metrics.calculator import MetricsCalculator
-
-# Cargar resultado procesado
-df = pd.read_csv("data/processed/agora_2007_01_08_a_transcript_speakers.csv")
-
-# 1. Porcentaje de tiempo de habla por género
-speaking_times = MetricsCalculator.calculate_speaking_time(df)
-print("Distribución de tiempo de habla:", speaking_times)
-
-# 2. Detección de interrupciones (con umbral de solapamiento de 0.5s)
-interruptions_df = MetricsCalculator.detect_interruptions(df, overlap_threshold=0.5)
-print(f"Total de interrupciones detectadas: {len(interruptions_df)}")
-display(interruptions_df.head())
+Ejecutar un archivo de pruebas específico:
+```bash
+python -m pytest tests/test_performance.py -v
 ```

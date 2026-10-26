@@ -59,11 +59,12 @@ class AudioProcessor:
         """
         Inicializa el entorno y carga los modelos en la GPU asignada.
         """
-        self.device_str = f"cuda:{gpu_index}"
-        self.device = torch.device(self.device_str)
-        
-        # Aislar GPU a nivel de entorno operativo
+        # 1. Aislar la GPU a nivel de entorno operativo PRIMERO
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+        
+        # 2. Al haber aislado la GPU, PyTorch siempre la mapeará al índice lógico 0
+        self.device_str = "cuda:0"
+        self.device = torch.device(self.device_str)
         
         try:
             self._load_models(hf_token)
