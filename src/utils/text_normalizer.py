@@ -4,7 +4,7 @@ import unicodedata
 # Marcas de Transcriber / ruido: [risas], (( )), <unk>, {pausa}
 _TAGS_RE = re.compile(r"\[[^\]]*\]|\(\([^)]*\)\)|\([^)]*\)|<[^>]*>|\{[^}]*\}")
 # ela geminada escrita con punto ("col.lecció") -> "col·lecció"
-_GEMINADA_RE = re.compile(r"(?<=[lL])[.•](?=[lL])")
+_GEMINADA_RE = re.compile(r"(?<=[lL])[.•](?=[lL])"w)
 # todo lo que no sea letra/número/espacio/punt volat
 _PUNCT_RE = re.compile(r"[^\w\s·]|_", flags=re.UNICODE)
 _SPACES_RE = re.compile(r"\s+")

@@ -1,81 +1,71 @@
-import os
+import json
 from pathlib import Path
 import pandas as pd
-from typing import Dict, Any
+from typing import Optional
+
 from src.evaluation.evaluator import Evaluator
+from src.evaluation.report import ResultsWriter
+from src.utils.paths import RunPaths
 
 class BatchEvaluator:
     """
-    Orquesta la evaluación masiva de un directorio de archivos Ground Truth (.trs)
-    contra sus respectivas predicciones (.csv), exportando el resumen a Excel.
+    Orquesta la evaluación masiva de un directorio de predicciones (.csv),
+    cruzándolas con su Ground Truth (.trs) si está disponible.
     """
     
-    def __init__(self, ground_truth_dir: str, predictions_dir: str, output_dir: str = "data/processed"):
-        self.gt_dir = Path(ground_truth_dir)
+    def __init__(self, predictions_dir: str, ground_truth_dir: Optional[str] = None, output_root: str = "data/processed", run_name: str = "evaluation"):
         self.pred_dir = Path(predictions_dir)
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.gt_dir = Path(ground_truth_dir) if ground_truth_dir else None
+        
+        # Inicializamos RunPaths usando su método de clase oficial
+        self.paths = RunPaths.create(output_root=output_root, run_name=run_name)
 
-    def run(self, output_filename: str = "agora_evaluation_results.xlsx") -> pd.DataFrame:
+    def run(self) -> pd.DataFrame:
         results = []
+        evaluations_json = {}
         
-        # Escanear recursivamente los archivos de referencia TRS
-        trs_files = list(self.gt_dir.glob("**/*.trs"))
+        csv_files = list(self.pred_dir.glob("**/*_transcript_speakers.csv"))
         
-        for trs_path in trs_files:
-            base_name = trs_path.stem  # ej: 'agora_2007_11_05_a'
+        for csv_path in csv_files:
+            base_name = csv_path.name.replace("_transcript_speakers.csv", "")
             
-            # Reconstruir el nombre del CSV generado por batch_runner
-            pred_filename = f"{base_name}_transcript_speakers.csv"
-            pred_path = self.pred_dir / pred_filename
+            meta_path = csv_path.with_name(f"{base_name}_metadata.json")
+            metadata = None
+            if meta_path.exists():
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
             
-            if not pred_path.exists():
-                print(f"Omitiendo {base_name}: No se encontró el CSV de predicción en {pred_path}")
-                continue
-                
+            trs_path = None
+            if self.gt_dir:
+                candidates = list(self.gt_dir.glob(f"**/{base_name}.trs"))
+                if candidates:
+                    trs_path = candidates[0]
+            
             try:
-                evaluator = Evaluator(str(trs_path), str(pred_path))
-                file_metrics = evaluator.evaluate_all()
-                flat_metrics = self._flatten_metrics(base_name, file_metrics)
-                results.append(flat_metrics)
+                evaluator = Evaluator(
+                    predictions_csv_path=str(csv_path),
+                    ground_truth_path=str(trs_path) if trs_path else None,
+                    metadata=metadata
+                )
+                file_eval = evaluator.analyze()
+                
+                results.append(file_eval.summary_row())
+                evaluations_json[base_name] = file_eval.to_dict()
+                
             except Exception as e:
-                print(f"Error evaluando {base_name}: {str(e)}")
+                print(f"Error procesando {base_name}: {str(e)}")
 
         df_results = pd.DataFrame(results)
         
         if not df_results.empty:
-            # Calcular una fila de promedios para todas las métricas numéricas
             mean_row = df_results.mean(numeric_only=True).to_dict()
             mean_row["File"] = "AVERAGE"
+            mean_row["Has_Reference"] = df_results["Has_Reference"].any()
             df_results = pd.concat([df_results, pd.DataFrame([mean_row])], ignore_index=True)
             
-            # Exportar a Excel
-            out_path = self.output_dir / output_filename
-            df_results.to_excel(out_path, index=False, float_format="%.4f")
-            print(f"Evaluación completada. Resultados guardados en: {out_path}")
+            writer = ResultsWriter(self.paths)
+            writer.write_excel({"Summary": df_results})
+            writer.write_json(evaluations_json)
+            writer.print_summary(df_results)
             
         return df_results
-
-    def _flatten_metrics(self, filename: str, metrics: Dict[str, Any]) -> dict:
-        """Aplana el diccionario anidado para convertirlo en columnas de Pandas."""
-        flat = {"File": filename}
-        
-        # Rendimiento
-        perf = metrics.get("Performance Metrics", {})
-        flat["ASR_WER"] = perf.get("ASR", {}).get("WER", None)
-        flat["ASR_CER"] = perf.get("ASR", {}).get("CER", None)
-        flat["DER (Diarization)"] = perf.get("Diarization", {}).get("DER", None)
-        
-        gender = perf.get("Gender_Classification", {})
-        flat["Gender_Accuracy"] = gender.get("accuracy", None)
-        flat["Gender_Sensitivity"] = gender.get("sensitivity_macro", None)
-        flat["Gender_Precision"] = gender.get("precision_macro", None)
-        
-        # Equidad
-        equity = metrics.get("Equity_Metrics", {})
-        spk_time = equity.get("Speaking_Time", {})
-        flat["Time_Female_Pct"] = spk_time.get("female_pct", None)
-        flat["Time_Male_Pct"] = spk_time.get("male_pct", None)
-        flat["Interruptions_M2F"] = equity.get("Male_to_Female_Interruptions", None)
-        
-        return flat
