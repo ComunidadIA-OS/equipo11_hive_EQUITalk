@@ -1,23 +1,31 @@
 import os
 import gc
+import time
 import logging
-from typing import List, Dict, Tuple
+from dataclasses import dataclass
+from math import gcd
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 import soundfile as sf
-import src.utils.compatibility
+import src.utils.compatibility 
 
 from faster_whisper import WhisperModel
 from pyannote.audio import Pipeline
 from transformers import Wav2Vec2Processor
 from transformers.models.wav2vec2.modeling_wav2vec2 import Wav2Vec2Model, Wav2Vec2PreTrainedModel
 
-# Importar excepciones personalizadas
 from src.utils.exceptions import ModelLoadingError, AudioProcessingError
 
 logger = logging.getLogger(__name__)
+
+SAMPLE_RATE = 16000
+SEGMENT_COLUMNS = ["start_time", "end_time", "speaker_label", "gender", "gender_confidence", "transcript"]
+TURN_COLUMNS = ["start_time", "end_time", "speaker_label", "gender", "gender_confidence"]
+
 
 class ModelHead(nn.Module):
     """Cabezal de clasificación para el modelo base Wav2Vec2."""
@@ -44,28 +52,39 @@ class AgeGenderModel(Wav2Vec2PreTrainedModel):
 
     def forward(self, input_values):
         h = self.wav2vec2(input_values)[0]
-        h = torch.mean(h, dim=1) # Resumen por chunk de audio
+        h = torch.mean(h, dim=1)  # Resumen por chunk de audio
         return self.age(h), torch.softmax(self.gender(h), dim=1)
 
 
+@dataclass
+class ProcessingOutput:
+    """Resultado de procesar un audio."""
+    segments: pd.DataFrame   # segmentos ASR + hablante + género
+    turns: pd.DataFrame      # turnos de diarización + género (admite solapes)
+    metadata: dict            # tiempos por etapa 
+
+
 class AudioProcessor:
-    """
-    Orquesta el pipeline de procesamiento de voz (ASR, Diarización, Género).
-    """
-    
+    """Orquesta el pipeline de procesamiento de voz (ASR, Diarización, Género)."""
+
     CLASSES = ["female", "male", "child"]
-    
-    def __init__(self, gpu_index: int = 0, hf_token: str = None):
+
+    def __init__(self, gpu_index: int = 0, hf_token: str = None,
+                 language: Optional[str] = "ca", monitor_gpu: bool = True):
         """
         Inicializa el entorno y carga los modelos en la GPU asignada.
         """
-        # 1. Aislar la GPU a nivel de entorno operativo PRIMERO
+        self.gpu_index = gpu_index
+        self.language = language
+        self.monitor_gpu = monitor_gpu
+
+        # 1. Aislar la GPU a nivel de entorno operativo 
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
-        
         # 2. Al haber aislado la GPU, PyTorch siempre la mapeará al índice lógico 0
         self.device_str = "cuda:0"
         self.device = torch.device(self.device_str)
-        
+
+        t0 = time.perf_counter()
         try:
             self._load_models(hf_token)
         except Exception as e:
@@ -73,130 +92,166 @@ class AudioProcessor:
             raise ModelLoadingError(f"Error cargando modelos en GPU {gpu_index}: {str(e)}") from e
 
     def _load_models(self, hf_token: str) -> None:
-        """Carga los modelos en memoria de video (VRAM) optimizados para float16."""
+        """
+        Carga los modelos en memoria de video (VRAM) optimizados para float16.
+        """
         logger.info(f"Cargando modelos en {self.device_str} (float16)...")
-        
+
         # 1. ASR (faster-whisper)
-        self.asr_model = WhisperModel(
-            "large-v3-turbo", 
-            device="cuda", 
-            compute_type="float16"
-        )
-        
+        self.asr_model = WhisperModel("large-v3-turbo", device="cuda", compute_type="float16")
+
         # 2. Diarización (pyannote.audio 3.1)
         if not hf_token:
             raise ValueError("Se requiere hf_token para pyannote.")
-        self.dia_pipe = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=hf_token
-        )
+        try:      # pyannote >= 4 
+            self.dia_pipe = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", token=hf_token)
+        except TypeError:   # pyannote 3.x
+            self.dia_pipe = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=hf_token)
         self.dia_pipe.to(self.device)
-        
+
         # 3. Clasificación de género
         name = "audeering/wav2vec2-large-robust-24-ft-age-gender"
         self.gender_proc = Wav2Vec2Processor.from_pretrained(name)
         self.gender_model = AgeGenderModel.from_pretrained(name).half().to(self.device).eval()
 
-    def process_file(self, file_path: str, gender_threshold: float = 0.8) -> pd.DataFrame:
+    @staticmethod
+    def _load_audio(file_path: str) -> np.ndarray:
         """
-        Ejecuta el pipeline completo para un archivo de audio.
+        Lee el audio y lo deja en mono / 16 kHz.
         """
-        logger.info(f"Procesando archivo: {file_path}")
-        
-        try:
-            # Leer audio (mono; 16kHz)
-            audio, sr = sf.read(file_path, dtype="float32")
-            if sr != 16000:
-                raise ValueError(f"Frecuencia de muestreo incorrecta: {sr}Hz. Se esperaba 16000Hz.")
-            if audio.ndim != 1:
-                raise ValueError("El audio debe tener un solo canal (mono).")
+        audio, sr = sf.read(file_path, dtype="float32", always_2d=False)
+        if audio.ndim == 2:
+            audio = audio.mean(axis=1)
+        if sr != SAMPLE_RATE:
+            from scipy.signal import resample_poly
+            g = gcd(SAMPLE_RATE, sr)
+            audio = resample_poly(audio, SAMPLE_RATE // g, sr // g).astype("float32")
+        return np.ascontiguousarray(audio)
 
-            # 1. Transcripción
-            segments, _ = self.asr_model.transcribe(
-                audio, language="ca", vad_filter=True, condition_on_previous_text=False
-            )
-            transcripts = [{"start_time": s.start, "end_time": s.end, "transcript": s.text.strip()} for s in segments]
+    def process_file(self, file_path: str, gender_threshold: float = 0.8) -> ProcessingOutput:
+            """Ejecuta el pipeline completo para un audio."""
+            logger.info(f"Procesando archivo: {file_path}")
+            waveform = None
             
-            # 2. Diarización
-            waveform = torch.from_numpy(audio).unsqueeze(0).to(self.device)
-            diar = self.dia_pipe({"waveform": waveform, "sample_rate": 16000})
-            turns = [(t.start, t.end, spk) for t, _, spk in diar.itertracks(yield_label=True)]
+            # Medir tiempo de ejecución total del archivo
+            t_start = time.perf_counter()
             
-            # 3. Cruce de datos y Clasificación de Género
-            df_result = self._merge_and_classify(audio, transcripts, turns, gender_threshold)
-            
-            return df_result
-            
-        except Exception as e:
-            logger.error(f"Fallo durante el procesamiento de {file_path}: {e}")
-            raise AudioProcessingError(f"Error procesando el archivo {file_path}: {str(e)}") from e
-            
-        finally:
-            # Limpieza exhaustiva de VRAM en cada iteración
-            if 'waveform' in locals():
+            try:
+                audio = self._load_audio(file_path)
+                duration = len(audio) / SAMPLE_RATE
+
+                # 1. Transcripción
+                segments, info = self.asr_model.transcribe(
+                    audio, language=self.language, vad_filter=True, condition_on_previous_text=False)
+                transcripts = [{"start_time": s.start, "end_time": s.end, "transcript": s.text.strip()}
+                            for s in segments]
+
+                # 2. Diarización
+                waveform = torch.from_numpy(audio).unsqueeze(0).to(self.device)
+                diar = self.dia_pipe({"waveform": waveform, "sample_rate": SAMPLE_RATE})
+                annotation = getattr(diar, "speaker_diarization", diar)
+                turns = [(t.start, t.end, spk) for t, _, spk in annotation.itertracks(yield_label=True)]
+
+                # 3. Asignar hablante
+                df_text = self._assign_speakers(transcripts, turns)
+
+                # 4. Género por hablante
+                speaker_gender = self._classify_speakers(audio, turns, gender_threshold)
+
+                segments_df, turns_df = self._build_outputs(df_text, turns, speaker_gender)
+                
+                # Calcular tiempo total de procesamiento
+                processing_seconds = round(time.perf_counter() - t_start, 3)
+
+                metadata = {
+                    "processing_seconds": processing_seconds,  # <--- TIEMPO TOTAL AQUÍ
+                    "audio_duration_seconds": round(duration, 3),
+                    "model_load_seconds": self.model_load_seconds,
+                    "language_requested": self.language,
+                    "language_detected": getattr(info, "language", None),
+                    "language_probability": getattr(info, "language_probability", None),
+                    "gpu_index": self.gpu_index,
+                }
+                return ProcessingOutput(segments_df, turns_df, metadata)
+
+            except Exception as e:
+                logger.error(f"Fallo durante el procesamiento de {file_path}: {e}")
+                raise AudioProcessingError(f"Error procesando el archivo {file_path}: {str(e)}") from e
+
+            finally:
                 del waveform
-            torch.cuda.empty_cache()
-            gc.collect()
+                torch.cuda.empty_cache()
+                gc.collect()
 
-    def _merge_and_classify(
-        self, 
-        audio: np.ndarray, 
-        transcripts: List[Dict], 
-        turns: List[Tuple],
-        threshold: float
-    ) -> pd.DataFrame:
-        """Asigna hablantes al texto y calcula el género por cada turno de voz."""
-        
-        # A. Asignar Hablante al Texto
-        df_text = pd.DataFrame(transcripts)
-        if df_text.empty:
-            return pd.DataFrame(columns=["start_time", "end_time", "speaker_label", "transcript", "gender"])
-            
-        def get_best_speaker(seg):
-            overlap = {}
-            for start, end, spk in turns:
-                o = min(end, seg["end_time"]) - max(start, seg["start_time"])
-                if o > 0:
-                    overlap[spk] = overlap.get(spk, 0) + o
-            return max(overlap, key=overlap.get) if overlap else "UNKNOWN"
-            
-        df_text["speaker_label"] = df_text.apply(get_best_speaker, axis=1)
+    @staticmethod
+    def _assign_speakers(transcripts: List[Dict], turns: List[Tuple]) -> pd.DataFrame:
+        """
+        Asigna a cada segmento de texto el hablante con mayor solape temporal.
+        """
+        df = pd.DataFrame(transcripts, columns=["start_time", "end_time", "transcript"])
+        if df.empty:
+            df["speaker_label"] = []
+            return df
+        t_start = np.array([t[0] for t in turns], dtype=float)
+        t_end = np.array([t[1] for t in turns], dtype=float)
+        t_spk = [t[2] for t in turns]
+        labels = []
+        for s, e in zip(df["start_time"], df["end_time"]):
+            if len(turns) == 0:
+                labels.append("UNKNOWN")
+                continue
+            ov = np.minimum(t_end, e) - np.maximum(t_start, s)
+            acc: Dict[str, float] = {}
+            for i in np.nonzero(ov > 0)[0]:
+                acc[t_spk[i]] = acc.get(t_spk[i], 0.0) + float(ov[i])
+            labels.append(max(acc, key=acc.get) if acc else "UNKNOWN")
+        df["speaker_label"] = labels
+        return df
 
-        # B. Extraer género por cada hablante detectado
+    def _classify_speakers(self, audio: np.ndarray, turns: List[Tuple], threshold: float) -> Dict[str, Tuple[str, float]]:
+        """
+        Género por hablante: {speaker: (género, confianza)}. Máx. 60 s de audio por hablante.
+        """
         turns_df = pd.DataFrame(turns, columns=["start", "end", "speaker"])
         turns_df["dur"] = turns_df["end"] - turns_df["start"]
-        
-        speaker_genders = {}
+        result: Dict[str, Tuple[str, float]] = {}
         for spk, group in turns_df.groupby("speaker"):
             probs, weights, used = [], [], 0.0
-            
-            # Filtrar turnos cortos y ordenar por duración
-            valid_turns = group[group["dur"] >= 1.0].sort_values("dur", ascending=False)
-            
-            for _, r in valid_turns.iterrows():
+            valid = group[group["dur"] >= 1.0]
+            if valid.empty:                       # hablante solo con intervenciones cortas
+                valid = group[group["dur"] >= 0.5]
+            for _, r in valid.sort_values("dur", ascending=False).iterrows():
                 p, w = self._get_gender_probs(audio, r["start"], r["end"])
                 if p is not None:
                     probs.append(p)
                     weights.append(w)
                     used += w
-                if used >= 60.0:  # Analizar un máximo de 60 segundos por hablante para eficiencia
+                if used >= 60.0:
                     break
-                    
             if probs:
                 avg_p = np.average(probs, axis=0, weights=weights)
-                # Aplicar umbral para decisión final
-                if max(avg_p) >= threshold:
-                    speaker_genders[spk] = self.CLASSES[int(np.argmax(avg_p))]
-                else:
-                    speaker_genders[spk] = "unknown"
+                conf = float(max(avg_p))
+                result[spk] = (self.CLASSES[int(np.argmax(avg_p))] if conf >= threshold else "unknown", conf)
             else:
-                speaker_genders[spk] = "unknown"
+                result[spk] = ("unknown", 0.0)
+        return result
 
-        # C. Unir género a la tabla final
-        df_text["gender"] = df_text["speaker_label"].map(speaker_genders).fillna("unknown")
-        
-        # Retornar el dataframe con el orden deseado
-        return df_text[["start_time", "end_time", "speaker_label", "gender", "transcript"]]
+    @staticmethod
+    def _build_outputs(df_text: pd.DataFrame, turns: List[Tuple],
+                       speaker_gender: Dict[str, Tuple[str, float]]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        gmap = {k: v[0] for k, v in speaker_gender.items()}
+        cmap = {k: v[1] for k, v in speaker_gender.items()}
+
+        df_text = df_text.copy()
+        df_text["gender"] = df_text["speaker_label"].map(gmap).fillna("unknown")
+        df_text["gender_confidence"] = df_text["speaker_label"].map(cmap).fillna(0.0)
+        segments = df_text.reindex(columns=SEGMENT_COLUMNS)
+
+        turns_df = pd.DataFrame(turns, columns=["start_time", "end_time", "speaker_label"])
+        turns_df["gender"] = turns_df["speaker_label"].map(gmap).fillna("unknown")
+        turns_df["gender_confidence"] = turns_df["speaker_label"].map(cmap).fillna(0.0)
+        turns_df = turns_df.sort_values(["start_time", "end_time"]).reset_index(drop=True)
+        return segments, turns_df.reindex(columns=TURN_COLUMNS)
 
     @torch.no_grad()
     def _get_gender_probs(self, audio: np.ndarray, start: float, end: float, max_chunk: float = 15.0):
@@ -205,21 +260,16 @@ class AudioProcessor:
         """
         results, weights = [], []
         t = start
-        
         while t < end:
             t2 = min(t + max_chunk, end)
-            if t2 - t >= 0.5:  # Omitir fragmentos minúsculos
-                chunk = audio[int(t * 16000) : int(t2 * 16000)]
-                x = self.gender_proc(chunk, sampling_rate=16000)["input_values"][0]
-                # Convertir a tensor float16
+            if t2 - t >= 0.5:
+                chunk = audio[int(t * SAMPLE_RATE): int(t2 * SAMPLE_RATE)]
+                x = self.gender_proc(chunk, sampling_rate=SAMPLE_RATE)["input_values"][0]
                 x = torch.tensor(x, dtype=torch.float16, device=self.device)[None]
-                
                 _, p = self.gender_model(x)
                 results.append(p[0].float().cpu().numpy())
                 weights.append(t2 - t)
             t = t2
-            
         if not results:
             return None, 0.0
-            
         return np.average(results, axis=0, weights=weights), sum(weights)
