@@ -152,7 +152,7 @@ class AudioProcessor:
                         multilingual=True,
                         beam_size=5,
 
-                        vad_filter=False,
+                        vad_filter=True,
                         vad_parameters=dict(
                             threshold=0.2,
                             min_silence_duration_ms=700,
