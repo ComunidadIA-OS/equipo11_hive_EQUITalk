@@ -9,6 +9,19 @@ from src.metrics.performance import PerformanceCalculator, PerformanceResult
 from src.metrics.equity import EquityCalculator
 from src.evaluation.results import FileEvaluation, EquityComparison
 
+
+def clip_reference(df: pd.DataFrame, dur: float) -> pd.DataFrame:
+    df = df[df["start_time"] < dur].copy()
+    cut = df["end_time"] > dur
+    for i in df.index[cut]:
+        s, e = df.at[i, "start_time"], df.at[i, "end_time"]
+        words = str(df.at[i, "transcript"]).split()
+        keep = max(1, round(len(words) * (dur - s) / max(e - s, 1e-6)))
+        df.at[i, "transcript"] = " ".join(words[:keep])
+        df.at[i, "end_time"] = dur
+    return df
+
+
 class Evaluator:
     """
     Orquesta la evaluación cruzando las predicciones del modelo con el Ground Truth (si existe).
@@ -57,10 +70,17 @@ class Evaluator:
         if self.df_true is not None and not self.df_true.empty:
             has_ref = True
             
+            dur = None
+            if self.metadata and "audio_duration_seconds" in self.metadata:
+                dur = self.metadata["audio_duration_seconds"]
+                self.df_true = clip_reference(self.df_true, dur)
+            
             perf_result.asr = PerformanceCalculator.calculate_asr_metrics(self.df_true, self.df_pred)
             
             diarization_df = self.df_turns if self.df_turns is not None else self.df_pred
-            perf_result.diarization = PerformanceCalculator.calculate_diarization_metrics(self.df_true, diarization_df)
+            perf_result.diarization = PerformanceCalculator.calculate_diarization_metrics(
+                self.df_true, diarization_df, dur=dur
+            )
             
             perf_result.gender = PerformanceCalculator.calculate_gender_metrics(self.df_true, self.df_pred)
             

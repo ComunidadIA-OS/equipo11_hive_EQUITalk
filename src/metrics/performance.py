@@ -16,8 +16,6 @@ NAN = float("nan")
 class ASRMetrics:
     wer: float = NAN                 # WER con texto normalizado
     cer: float = NAN
-    wer_raw: float = NAN             
-    cer_raw: float = NAN
     ref_words: int = 0
     hyp_words: int = 0
     substitutions: int = 0
@@ -186,7 +184,8 @@ class PerformanceCalculator:
     @staticmethod
     def calculate_diarization_metrics(df_true: pd.DataFrame, df_pred: pd.DataFrame,
                                       collar: float = 0.25, skip_overlap: bool = False,
-                                      hypothesis_source: str = "diarization_turns") -> DiarizationMetrics:
+                                      hypothesis_source: str = "diarization_turns",
+                                      dur: Optional[float] = None) -> DiarizationMetrics:
         from pyannote.core import Annotation, Segment, Timeline
         from pyannote.metrics.diarization import DiarizationErrorRate
 
@@ -204,9 +203,12 @@ class PerformanceCalculator:
             dm.der = dm.der_no_collar = 1.0 if len(hyp) > 0 else 0.0
             return dm
 
-        lo = min(ref.get_timeline().extent().start, hyp.get_timeline().extent().start if len(hyp) else np.inf)
-        hi = max(ref.get_timeline().extent().end, hyp.get_timeline().extent().end if len(hyp) else 0.0)
-        uem = Timeline([Segment(lo, hi)])
+        if dur is not None:
+            uem = Timeline([Segment(0, dur)])
+        else:
+            lo = min(ref.get_timeline().extent().start, hyp.get_timeline().extent().start if len(hyp) else np.inf)
+            hi = max(ref.get_timeline().extent().end, hyp.get_timeline().extent().end if len(hyp) else 0.0)
+            uem = Timeline([Segment(lo, hi)])
 
         def run(col: float) -> dict:
             metric = DiarizationErrorRate(collar=col, skip_overlap=skip_overlap)
