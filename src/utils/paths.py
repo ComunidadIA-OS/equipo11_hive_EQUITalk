@@ -2,9 +2,10 @@
 
     <output_root>/<run_name>/
         predictions/
-            <audio>_transcript_speakers.csv   (segmentos ASR + hablante + género)
-            <audio>_diarization.csv           (turnos de diarización + género)
-            <audio>_metadata.json             (tiempos y memoria por etapa + GPU)
+            <audio>/
+                <audio>_transcript_speakers.csv   (segmentos ASR + hablante + género)
+                <audio>_diarization.csv           (turnos de diarización + género)
+                <audio>_metadata.json             (tiempos y memoria por etapa + GPU)
         evaluation_results.xlsx               (resumen y detalle de métricas)
         evaluation_results.json               (todo, anidado)
         run_config.json                       (argumentos y versiones)

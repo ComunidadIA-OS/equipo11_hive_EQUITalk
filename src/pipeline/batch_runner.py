@@ -38,10 +38,10 @@ def _process_single_audio_worker(args: tuple) -> Dict[str, Any]:
     try:
         output = _worker_processor.process_file(file_path)
         
-        # process_file devuelve tres cosas: segmentos (ASR), turnos (diarización) y metadatos
         out_dir = Path(output_dir) / "predictions" / file_name
         os.makedirs(out_dir, exist_ok=True)
-        
+
+        # process_file devuelve tres cosas: segmentos (ASR), turnos (diarización) y metadatos
         out_path = out_dir / f"{file_name}_transcript_speakers.csv"
         output.segments.to_csv(out_path, index=False)
         output.turns.to_csv(out_dir / f"{file_name}_diarization.csv", index=False)
