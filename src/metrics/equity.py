@@ -323,18 +323,32 @@ class EquityCalculator:
             fm.first_female_onset_pct = _pct(fm.first_female_onset_s, res.span_s)
 
         # Interrupciones
-        ev = cls.detect_interruptions(turns, overlap_threshold_s)
+        # 1. Filtramos ruido (segmentos < 0.3s) y usamos las unidades sin fundir
+        units_clean = units[units["duration"] >= 0.3].reset_index(drop=True)
+        ev_all = cls.detect_interruptions(units_clean, overlap_threshold_s)
+        
+        # 2. Separamos backchannels (asentimientos) de las interrupciones reales
+        if not ev_all.empty:
+            ev_all["is_backchannel"] = ~ev_all["takes_floor"]
+            ev = ev_all[~ev_all["is_backchannel"]].copy()
+        else:
+            ev = ev_all.copy()
+
         im = res.interruptions
         im.total = len(ev)
+        
         if im.total:
             counts = ev["type"].value_counts()
             im.male_over_female = int(counts.get("male_over_female", 0))
             im.female_over_male = int(counts.get("female_over_male", 0))
             im.male_over_male = int(counts.get("male_over_male", 0))
             im.female_over_female = int(counts.get("female_over_female", 0))
-            ft = ev[ev.takes_floor]["type"].value_counts()
+            
+            # Las interrupciones reales ('ev') ya son aquellas donde takes_floor es True, 
+            ft = ev[ev["takes_floor"]]["type"].value_counts()
             im.floor_taking_male_over_female = int(ft.get("male_over_female", 0))
             im.floor_taking_female_over_male = int(ft.get("female_over_male", 0))
+            
         mf, fmv = im.male_over_female, im.female_over_male
         im.asymmetry_index = (mf - fmv) / (mf + fmv) if (mf + fmv) > 0 else NAN
         hours = res.span_s / 3600.0

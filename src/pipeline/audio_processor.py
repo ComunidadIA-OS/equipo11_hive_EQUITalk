@@ -147,7 +147,14 @@ class AudioProcessor:
                 # 1. Transcripción 
                 with prof.stage("asr"):
                     segments, info = self.asr_model.transcribe(
-                        audio, language=self.language, vad_filter=True, multilingual=True, condition_on_previous_text=False)
+                            audio, language=self.language, multilingual=True, beam_size=5,
+                            vad_filter=True,
+                            vad_parameters=dict(threshold=0.35, min_silence_duration_ms=700, speech_pad_ms=300),
+                            condition_on_previous_text=False,
+                            temperature=[0.0, 0.2, 0.4],
+                            word_timestamps=True,
+                            hallucination_silence_threshold=2.0,
+                        )
                     transcripts = [{"start_time": s.start, "end_time": s.end, "transcript": s.text.strip()}
                                 for s in segments]
 

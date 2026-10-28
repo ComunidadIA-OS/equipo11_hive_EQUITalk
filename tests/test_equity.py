@@ -48,7 +48,7 @@ def df_raw_segments():
 
 @pytest.fixture
 def df_turns_gap():
-    """Datos para probar la unión de turnos (_merge_turns)."""
+    """Datos para probar la unión de turnos (_merge_turns) y detección de interrupciones."""
     return pd.DataFrame([
         {"start_time": 0.0, "end_time": 2.0, "speaker_label": "spk1", "gender": "female"},
         {"start_time": 2.5, "end_time": 4.0, "speaker_label": "spk1", "gender": "female"}, # Separado por 0.5s
@@ -81,6 +81,17 @@ def test_overlap_seconds(df_turns_gap):
     # spk1(0-2, 2.5-4, 6-8) y spk2(3-5). Solape entre 3.0 y 4.0 -> 1.0 segundo.
     overlap = EquityCalculator._overlap_seconds(df_turns_gap)
     assert overlap == 1.0
+
+def test_detect_interruptions_backchannel():
+    """Valida que un solape donde el interruptor NO toma la palabra se identifique adecuadamente."""
+    df_units = pd.DataFrame([
+        {"start_time": 0.0, "end_time": 5.0, "speaker_label": "spk1", "gender": "female"},
+        {"start_time": 1.0, "end_time": 2.0, "speaker_label": "spk2", "gender": "male"} # Entra durante spk1 pero termina antes (back-channel)
+    ])
+    
+    ev_all = EquityCalculator.detect_interruptions(df_units, overlap_threshold=0.5)
+    assert len(ev_all) == 1
+    assert not ev_all.iloc[0]["takes_floor"] # Es un asentimiento/backchannel
 
 # Tests del cálculo principal
 # ----------------------------------------------------------------------------
@@ -127,11 +138,11 @@ def test_compute_full_metrics(df_raw_segments, df_turns_gap):
     assert metrics.floor.first_female_onset_s == 0.0
     
     # 7. Interrupciones (InterruptionMetrics)
-    # spk2 empieza en 3.0, spk1 termina su turno fusionado en 4.0. -> Solape de 1.0s. 
-    # Umbral 0.5s -> Interrupción válida de male a female.
+    # spk1 habla de 2.5 a 4.0. spk2 entra en 3.0 y habla hasta 5.0. 
+    # Solape = 1.0s (>= 0.5s). spk2 finaliza en 5.0 > 4.0 (toma la palabra).
     assert metrics.interruptions.total == 1
     assert metrics.interruptions.male_over_female == 1
-    assert metrics.interruptions.takes_floor_male_over_female == 1 if hasattr(metrics.interruptions, 'takes_floor_male_over_female') else metrics.interruptions.floor_taking_male_over_female == 1
+    assert metrics.interruptions.floor_taking_male_over_female == 1
     
     # 8. Análisis Temporal (TemporalMetrics)
     # 2 bins sobre 8.0s: q1(0-4s), q2(4-8s).

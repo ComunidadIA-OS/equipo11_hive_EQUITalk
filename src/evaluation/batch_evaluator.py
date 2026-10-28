@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 import pandas as pd
 from typing import Optional
@@ -29,12 +28,6 @@ class BatchEvaluator:
         for csv_path in csv_files:
             base_name = csv_path.name.replace("_transcript_speakers.csv", "")
             
-            meta_path = csv_path.with_name(f"{base_name}_metadata.json")
-            metadata = None
-            if meta_path.exists():
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    metadata = json.load(f)
-            
             trs_path = None
             if self.gt_dir:
                 candidates = list(self.gt_dir.glob(f"**/{base_name}.trs"))
@@ -44,8 +37,7 @@ class BatchEvaluator:
             try:
                 evaluator = Evaluator(
                     predictions_csv_path=str(csv_path),
-                    ground_truth_path=str(trs_path) if trs_path else None,
-                    metadata=metadata
+                    ground_truth_path=str(trs_path) if trs_path else None
                 )
                 file_eval = evaluator.analyze()
                 
