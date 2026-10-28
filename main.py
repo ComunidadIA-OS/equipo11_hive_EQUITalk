@@ -31,9 +31,6 @@ def parse_args():
     parser.add_argument("--skip_inference", action="store_true", 
                         help="Salta la generación de predicciones y corre directamente la evaluación usando los CSVs en pred_dir.")
 
-    parser.add_argument("--skip_inference", action="store_true", help="Salta la inferencia y solo ejecuta la evaluación")
-
-
     return parser.parse_args()
 
 def main():
