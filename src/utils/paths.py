@@ -31,15 +31,21 @@ class RunPaths:
     def predictions_dir(self) -> Path:
         return self.run_dir / "predictions"
 
-    # Predicciones por audio 
+    def audio_dir(self, stem: str) -> Path:
+        """Crea y devuelve la subcarpeta específica para el audio."""
+        folder = self.predictions_dir / stem
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    # Predicciones por audio
     def segments_csv(self, stem: str) -> Path:
-        return self.predictions_dir / f"{stem}_transcript_speakers.csv"
+        return self.audio_dir(stem) / f"{stem}_transcript_speakers.csv"
 
     def diarization_csv(self, stem: str) -> Path:
-        return self.predictions_dir / f"{stem}_diarization.csv"
+        return self.audio_dir(stem) / f"{stem}_diarization.csv"
 
     def metadata_json(self, stem: str) -> Path:
-        return self.predictions_dir / f"{stem}_metadata.json"
+        return self.audio_dir(stem) / f"{stem}_metadata.json"
 
     # Resultados
     @property

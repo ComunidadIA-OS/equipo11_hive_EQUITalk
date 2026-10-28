@@ -36,12 +36,12 @@ def _process_single_audio_worker(args: tuple) -> Dict[str, Any]:
     logger.info(f"Iniciando procesamiento de '{file_name}'")
     
     try:
-        # Usa la instancia estática global que ya cargó los modelos en _init_worker
         output = _worker_processor.process_file(file_path)
         
         # process_file devuelve tres cosas: segmentos (ASR), turnos (diarización) y metadatos
-        out_dir = Path(output_dir)
+        out_dir = Path(output_dir) / "predictions" / file_name
         os.makedirs(out_dir, exist_ok=True)
+        
         out_path = out_dir / f"{file_name}_transcript_speakers.csv"
         output.segments.to_csv(out_path, index=False)
         output.turns.to_csv(out_dir / f"{file_name}_diarization.csv", index=False)
