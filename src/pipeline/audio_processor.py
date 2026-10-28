@@ -144,10 +144,10 @@ class AudioProcessor:
                     audio = self._load_audio(file_path)
                 duration = len(audio) / SAMPLE_RATE
 
-                # 1. Transcripción (Whisper trabaja al recorrer `segments`, por eso va dentro)
+                # 1. Transcripción 
                 with prof.stage("asr"):
                     segments, info = self.asr_model.transcribe(
-                        audio, language=self.language, vad_filter=True, condition_on_previous_text=False)
+                        audio, language=self.language, vad_filter=True, multilingual=True, condition_on_previous_text=False)
                     transcripts = [{"start_time": s.start, "end_time": s.end, "transcript": s.text.strip()}
                                 for s in segments]
 
