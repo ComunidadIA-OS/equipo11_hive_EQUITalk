@@ -4,7 +4,7 @@
         predictions/
             <audio>_transcript_speakers.csv   (segmentos ASR + hablante + género)
             <audio>_diarization.csv           (turnos de diarización + género)
-            <audio>_profile.json              (tiempos por etapa + GPU)
+            <audio>_metadata.json             (tiempos y memoria por etapa + GPU)
         evaluation_results.xlsx               (resumen y detalle de métricas)
         evaluation_results.json               (todo, anidado)
         run_config.json                       (argumentos y versiones)
@@ -38,8 +38,8 @@ class RunPaths:
     def diarization_csv(self, stem: str) -> Path:
         return self.predictions_dir / f"{stem}_diarization.csv"
 
-    def profile_json(self, stem: str) -> Path:
-        return self.predictions_dir / f"{stem}_profile.json"
+    def metadata_json(self, stem: str) -> Path:
+        return self.predictions_dir / f"{stem}_metadata.json"
 
     # Resultados
     @property
