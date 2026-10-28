@@ -74,6 +74,11 @@ class TimingMetrics:
     total_s: float = NAN                         
     rtf_total: float = NAN                       
     model_load_s: float = NAN
+    asr_s: float = NAN                           # segundos por etapa
+    diarization_s: float = NAN
+    gender_s: float = NAN
+    ram_peak_mb: float = NAN                     # pico de RAM del proceso
+    gpu_peak_mb: float = NAN                     # memoria de GPU necesaria (máximo entre etapas)
     language_requested: Optional[str] = None
     language_detected: Optional[str] = None
     language_probability: Optional[float] = None
@@ -129,6 +134,11 @@ def gender_metrics_from_confusion(conf: Dict[str, Dict[str, float]], resolution_
     gm.sensitivity_macro = float(np.nanmean(list(rec.values()))) if not all(np.isnan(list(rec.values()))) else NAN
     gm.precision_macro = float(np.nanmean(list(prec.values()))) if not all(np.isnan(list(prec.values()))) else NAN
     return gm
+
+def _num(x) -> float:
+    """Convierte a float; None o valores ausentes pasan a NaN."""
+    return float(x) if x is not None else NAN
+
 
 _BITS = {"female": 1, "male": 2}
 _PRED_LABEL = {0: "no_speech", 1: "female", 2: "male", 4: "unknown"}
@@ -250,12 +260,19 @@ class PerformanceCalculator:
         if audio_dur > 0 and not np.isnan(total_sec):
             rtf = total_sec / audio_dur
             
+        stages = metadata.get("stage_seconds") or {}
+
         return TimingMetrics(
             available=True,
             audio_duration_s=audio_dur,
             total_s=total_sec,
             rtf_total=rtf,
-            model_load_s=metadata.get("model_load_seconds", NAN),
+            model_load_s=_num(metadata.get("model_load_seconds")),
+            asr_s=_num(stages.get("asr")),
+            diarization_s=_num(stages.get("diarization")),
+            gender_s=_num(stages.get("gender")),
+            ram_peak_mb=_num(metadata.get("ram_peak_mb")),
+            gpu_peak_mb=_num(metadata.get("gpu_peak_mb")),
             language_requested=metadata.get("language_requested"),
             language_detected=metadata.get("language_detected"),
             language_probability=metadata.get("language_probability"),

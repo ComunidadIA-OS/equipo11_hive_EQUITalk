@@ -113,6 +113,13 @@ El archivo Excel generado en `data/processed/` contiene las siguientes evaluacio
 * `Time_Female_Pct` y `Time_Male_Pct`: Porcentaje de tiempo de uso de la palabra.
 * `Interruptions_M2F`: Conteo de interrupciones directas de hablantes masculinos hacia hablantes femeninas.
 
+* **Tiempo y Memoria (Inferencia):** se leen de `<audio>_metadata.json`, que la inferencia guarda junto a cada CSV.
+* `Time_total_s` y `RTF_total`: segundos de procesamiento y *Real Time Factor* (segundos de cómputo por segundo de audio; <1 es más rápido que tiempo real).
+* `Time_ASR_s`, `Time_Diarization_s`, `Time_Gender_s`: segundos de cada etapa del pipeline.
+* `Model_load_s`: segundos de carga de los modelos (una vez por GPU).
+* `RAM_peak_MB`: pico de RAM del proceso hasta terminar ese audio (incluye los modelos cargados).
+* `GPU_peak_MB`: memoria máxima de la tarjeta gráfica que necesita el pipeline (incluye los tres modelos, también Whisper). El detalle por etapa está en el `_metadata.json`.
+
 ---
 
 ## Ejecución de Pruebas Unitarias

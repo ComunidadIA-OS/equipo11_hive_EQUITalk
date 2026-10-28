@@ -47,3 +47,24 @@ def test_file_evaluation_summary_with_reference():
     assert summary["Has_Reference"] is True
     assert summary["ASR_WER"] == 0.15
     assert summary["Time_Female_Err_pp"] == 5.0
+
+
+def test_file_evaluation_summary_incluye_tiempo_y_memoria():
+    t = TimingMetrics(available=True, audio_duration_s=60.0, total_s=15.0, rtf_total=0.25,
+                      asr_s=8.0, diarization_s=5.0, gender_s=2.0,
+                      ram_peak_mb=3500.0, gpu_peak_mb=6200.0)
+    eval_obj = FileEvaluation(file="test_audio", performance=PerformanceResult(timing=t))
+    summary = eval_obj.summary_row()
+
+    assert summary["Time_ASR_s"] == 8.0
+    assert summary["Time_Diarization_s"] == 5.0
+    assert summary["Time_Gender_s"] == 2.0
+    assert summary["RAM_peak_MB"] == 3500.0
+    assert summary["GPU_peak_MB"] == 6200.0
+
+
+def test_file_evaluation_summary_sin_metadata():
+    summary = FileEvaluation(file="test_audio").summary_row()
+
+    assert summary["Time_ASR_s"] is None
+    assert summary["RAM_peak_MB"] is None

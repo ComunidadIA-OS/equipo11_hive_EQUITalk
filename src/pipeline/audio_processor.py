@@ -19,6 +19,7 @@ from transformers import Wav2Vec2Processor
 from transformers.models.wav2vec2.modeling_wav2vec2 import Wav2Vec2Model, Wav2Vec2PreTrainedModel
 
 from src.utils.exceptions import ModelLoadingError, AudioProcessingError
+from src.utils.profiling import ResourceProfiler
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class AudioProcessor:
         t0 = time.perf_counter()
         try:
             self._load_models(hf_token)
+            self.model_load_seconds = round(time.perf_counter() - t0, 3)
         except Exception as e:
             logger.error(f"Fallo al inicializar modelos en {self.device_str}: {e}")
             raise ModelLoadingError(f"Error cargando modelos en GPU {gpu_index}: {str(e)}") from e
@@ -133,32 +135,34 @@ class AudioProcessor:
             logger.info(f"Procesando archivo: {file_path}")
             waveform = None
             
-            # Medir tiempo de ejecución total del archivo
+            # Medir tiempo de ejecución total del archivo y, por etapa, tiempo y memoria
             t_start = time.perf_counter()
+            prof = ResourceProfiler()
             
             try:
-                audio = self._load_audio(file_path)
+                with prof.stage("load_audio"):
+                    audio = self._load_audio(file_path)
                 duration = len(audio) / SAMPLE_RATE
 
-                # 1. Transcripción
-                segments, info = self.asr_model.transcribe(
-                    audio, language=self.language, vad_filter=True, condition_on_previous_text=False)
-                transcripts = [{"start_time": s.start, "end_time": s.end, "transcript": s.text.strip()}
-                            for s in segments]
+                # 1. Transcripción (Whisper trabaja al recorrer `segments`, por eso va dentro)
+                with prof.stage("asr"):
+                    segments, info = self.asr_model.transcribe(
+                        audio, language=self.language, vad_filter=True, condition_on_previous_text=False)
+                    transcripts = [{"start_time": s.start, "end_time": s.end, "transcript": s.text.strip()}
+                                for s in segments]
 
                 # 2. Diarización
-                waveform = torch.from_numpy(audio).unsqueeze(0).to(self.device)
-                diar = self.dia_pipe({"waveform": waveform, "sample_rate": SAMPLE_RATE})
-                annotation = getattr(diar, "speaker_diarization", diar)
-                turns = [(t.start, t.end, spk) for t, _, spk in annotation.itertracks(yield_label=True)]
+                with prof.stage("diarization"):
+                    waveform = torch.from_numpy(audio).unsqueeze(0).to(self.device)
+                    diar = self.dia_pipe({"waveform": waveform, "sample_rate": SAMPLE_RATE})
+                    annotation = getattr(diar, "speaker_diarization", diar)
+                    turns = [(t.start, t.end, spk) for t, _, spk in annotation.itertracks(yield_label=True)]
 
-                # 3. Asignar hablante
-                df_text = self._assign_speakers(transcripts, turns)
-
-                # 4. Género por hablante
-                speaker_gender = self._classify_speakers(audio, turns, gender_threshold)
-
-                segments_df, turns_df = self._build_outputs(df_text, turns, speaker_gender)
+                # 3. Asignar hablante y 4. Género por hablante
+                with prof.stage("gender"):
+                    df_text = self._assign_speakers(transcripts, turns)
+                    speaker_gender = self._classify_speakers(audio, turns, gender_threshold)
+                    segments_df, turns_df = self._build_outputs(df_text, turns, speaker_gender)
                 
                 # Calcular tiempo total de procesamiento
                 processing_seconds = round(time.perf_counter() - t_start, 3)
@@ -171,6 +175,7 @@ class AudioProcessor:
                     "language_detected": getattr(info, "language", None),
                     "language_probability": getattr(info, "language_probability", None),
                     "gpu_index": self.gpu_index,
+                    **prof.summary(),  # stage_seconds, ram_peak_mb, gpu_peak_mb y detalle de GPU por etapa
                 }
                 return ProcessingOutput(segments_df, turns_df, metadata)
 

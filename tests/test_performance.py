@@ -148,3 +148,36 @@ class TestPerformanceCalculator:
         assert "asr" in serialized
         assert serialized["asr"]["wer"] == 0.15
         assert serialized["timing"]["available"] is True
+
+    def test_calculate_timing_metrics_etapas_y_memoria(self):
+        """
+        Los segundos por etapa y los picos de memoria del metadata.json llegan a TimingMetrics.
+        """
+        metadata = {
+            "audio_duration_seconds": 100.0,
+            "processing_seconds": 25.0,
+            "model_load_seconds": 30.0,
+            "stage_seconds": {"load_audio": 0.5, "asr": 12.0, "diarization": 9.0, "gender": 3.5},
+            "ram_peak_mb": 4096.0,
+            "gpu_peak_mb": None,   # sin GPU (o no medida)
+        }
+        metrics = PerformanceCalculator.calculate_timing_metrics(metadata)
+
+        assert metrics.rtf_total == pytest.approx(0.25)
+        assert metrics.model_load_s == 30.0
+        assert metrics.asr_s == 12.0
+        assert metrics.diarization_s == 9.0
+        assert metrics.gender_s == 3.5
+        assert metrics.ram_peak_mb == 4096.0
+        assert math.isnan(metrics.gpu_peak_mb)
+
+    def test_calculate_timing_metrics_metadata_antiguo(self):
+        """
+        Un metadata.json sin datos por etapa (versión anterior) no debe fallar.
+        """
+        metrics = PerformanceCalculator.calculate_timing_metrics(
+            {"audio_duration_seconds": 10.0, "processing_seconds": 2.0})
+
+        assert metrics.available is True
+        assert math.isnan(metrics.asr_s)
+        assert math.isnan(metrics.ram_peak_mb)

@@ -9,7 +9,7 @@ from src.utils.serialization import to_serializable
 KEY_COLUMNS = [
     "File", "Has_Reference", "ASR_WER", "DER", "Gender_Accuracy", 
     "Time_Female_Pct", "Time_Female_Pct_Ref", "Time_Female_Err_pp", 
-    "Interruptions_M2F", "RTF_total"
+    "Interruptions_M2F", "RTF_total", "RAM_peak_MB", "GPU_peak_MB"
 ]
 
 class ResultsWriter:

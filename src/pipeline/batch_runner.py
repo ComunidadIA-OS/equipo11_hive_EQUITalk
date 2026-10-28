@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import multiprocessing
 from pathlib import Path
@@ -36,11 +37,16 @@ def _process_single_audio_worker(args: tuple) -> Dict[str, Any]:
     
     try:
         # Usa la instancia estática global que ya cargó los modelos en _init_worker
-        df_result = _worker_processor.process_file(file_path)
+        output = _worker_processor.process_file(file_path)
         
-        out_path = Path(output_dir) / f"{file_name}_transcript_speakers.csv"
-        os.makedirs(output_dir, exist_ok=True)
-        df_result.to_csv(out_path, index=False)
+        # process_file devuelve tres cosas: segmentos (ASR), turnos (diarización) y metadatos
+        out_dir = Path(output_dir)
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = out_dir / f"{file_name}_transcript_speakers.csv"
+        output.segments.to_csv(out_path, index=False)
+        output.turns.to_csv(out_dir / f"{file_name}_diarization.csv", index=False)
+        with open(out_dir / f"{file_name}_metadata.json", "w", encoding="utf-8") as f:
+            json.dump(output.metadata, f, indent=2, ensure_ascii=False)
         
         logger.info(f"Procesamiento exitoso: {file_name} -> {out_path}")
         return {"file": file_path, "status": "success", "output_path": str(out_path)}
