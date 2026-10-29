@@ -39,7 +39,7 @@ class FileEvaluation:
     def to_dict(self) -> dict:
         return to_serializable(self)
 
-def summary_row(self) -> Dict[str, Any]:
+    def summary_row(self) -> Dict[str, Any]:
         """Fila plana con las métricas clave para la hoja 'Summary' del Excel."""
         p, eq = self.performance, self.equity
         pe, re_ = eq.prediction, eq.reference
