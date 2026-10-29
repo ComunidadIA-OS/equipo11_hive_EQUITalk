@@ -457,7 +457,7 @@ def build_interface():
         # Lógica para alternar el menú de forma nativa y robusta con Gradio
         def toggle_menu(is_open):
             new_state = not is_open
-            btn_text = "✕ Cerrar" if new_state else "☰ Menú"
+            btn_text = "✕ Cerrar" if new_state else "☰ Guía"
             return new_state, gr.update(visible=new_state), btn_text
 
         guide_state.click(
