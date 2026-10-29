@@ -435,9 +435,9 @@ El `Dockerfile` las instala desde los repositorios de Debian al construir la ima
 
 ---
 
-## 9. Hoja de ruta (Roadmap) y Acciones Futuras
+## 9. Hoja de ruta y Acciones Futuras
 
-El desarrollo evolutivo de **EquiTalk** se estructura en fases orientadas a consolidar su precisión técnica, mantener su naturaleza de código abierto y garantizar un marco estricto de uso responsable y legalidad:
+El desarrollo evolutivo de **EQUITalk** se estructura en fases orientadas a consolidar su precisión técnica, mantener su naturaleza de código abierto y garantizar un marco estricto de uso responsable y legalidad:
 
 ### Fase 1: Estabilización del Core y Transparencia Local (Actual)
 
