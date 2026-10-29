@@ -71,18 +71,34 @@ class AudioProcessor:
     CLASSES = ["female", "male", "child"]
 
     def __init__(self, gpu_index: int = 0, hf_token: str = None,
-                 language: Optional[str] = "ca", monitor_gpu: bool = True):
+                 language: Optional[str] = "ca", monitor_gpu: bool = True,
+                 device: str = "auto", asr_model_name: str = "large-v3-turbo"):
         """
-        Inicializa el entorno y carga los modelos en la GPU asignada.
+        Inicializa el entorno y carga los modelos.
+
+        device: "cuda" (GPU NVIDIA), "cpu" (cualquier ordenador, más lento) o
+                "auto" (usa la GPU si la hay y, si no, la CPU).
+        asr_model_name: modelo de Whisper ("large-v3-turbo", "medium", "small"...).
+                        En CPU uno más pequeño va bastante más rápido, pero transcribe peor.
         """
         self.gpu_index = gpu_index
         self.language = language
         self.monitor_gpu = monitor_gpu
+        self.asr_model_name = asr_model_name
 
-        # 1. Aislar la GPU a nivel de entorno operativo 
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
-        # 2. Al haber aislado la GPU, PyTorch siempre la mapeará al índice lógico 0
-        self.device_str = "cuda:0"
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.use_cuda = device == "cuda"
+
+        if self.use_cuda:
+            # 1. Aislar la GPU a nivel de entorno operativo
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+            # 2. Al haber aislado la GPU, PyTorch siempre la mapeará al índice lógico 0
+            self.device_str = "cuda:0"
+            self.dtype = torch.float16      # en GPU: media precisión, más rápido y menos memoria
+        else:
+            self.device_str = "cpu"
+            self.dtype = torch.float32      # en CPU float16 no está bien soportado
         self.device = torch.device(self.device_str)
 
         t0 = time.perf_counter()
@@ -91,16 +107,19 @@ class AudioProcessor:
             self.model_load_seconds = round(time.perf_counter() - t0, 3)
         except Exception as e:
             logger.error(f"Fallo al inicializar modelos en {self.device_str}: {e}")
-            raise ModelLoadingError(f"Error cargando modelos en GPU {gpu_index}: {str(e)}") from e
+            raise ModelLoadingError(f"Error cargando modelos en {self.device_str}: {str(e)}") from e
 
     def _load_models(self, hf_token: str) -> None:
         """
-        Carga los modelos en memoria de video (VRAM) optimizados para float16.
+        Carga los modelos: en GPU con float16 y en CPU con int8 (Whisper) / float32 (resto).
         """
-        logger.info(f"Cargando modelos en {self.device_str} (float16)...")
+        logger.info(f"Cargando modelos en {self.device_str} ({self.dtype})...")
 
-        # 1. ASR (faster-whisper)
-        self.asr_model = WhisperModel("large-v3-turbo", device="cuda", compute_type="float16")
+        # 1. ASR (faster-whisper). En CPU, int8 reduce mucho la memoria y el tiempo.
+        if self.use_cuda:
+            self.asr_model = WhisperModel(self.asr_model_name, device="cuda", compute_type="float16")
+        else:
+            self.asr_model = WhisperModel(self.asr_model_name, device="cpu", compute_type="int8")
 
         # 2. Diarización (pyannote.audio 3.1)
         if not hf_token:
@@ -114,7 +133,7 @@ class AudioProcessor:
         # 3. Clasificación de género
         name = "audeering/wav2vec2-large-robust-24-ft-age-gender"
         self.gender_proc = Wav2Vec2Processor.from_pretrained(name)
-        self.gender_model = AgeGenderModel.from_pretrained(name).half().to(self.device).eval()
+        self.gender_model = AgeGenderModel.from_pretrained(name).to(self.device, dtype=self.dtype).eval()
 
     @staticmethod
     def _load_audio(file_path: str) -> np.ndarray:
@@ -191,6 +210,8 @@ class AudioProcessor:
                     "language_detected": getattr(info, "language", None),
                     "language_probability": getattr(info, "language_probability", None),
                     "gpu_index": self.gpu_index,
+                    "device": self.device_str,
+                    "asr_model": self.asr_model_name,
                     **prof.summary(),  # stage_seconds, ram_peak_mb, gpu_peak_mb y detalle de GPU por etapa
                 }
                 return ProcessingOutput(segments_df, turns_df, metadata)
@@ -201,7 +222,8 @@ class AudioProcessor:
 
             finally:
                 del waveform
-                torch.cuda.empty_cache()
+                if self.use_cuda:
+                    torch.cuda.empty_cache()
                 gc.collect()
 
     @staticmethod
@@ -286,7 +308,7 @@ class AudioProcessor:
             if t2 - t >= 0.5:
                 chunk = audio[int(t * SAMPLE_RATE): int(t2 * SAMPLE_RATE)]
                 x = self.gender_proc(chunk, sampling_rate=SAMPLE_RATE)["input_values"][0]
-                x = torch.tensor(x, dtype=torch.float16, device=self.device)[None]
+                x = torch.tensor(x, dtype=self.dtype, device=self.device)[None]
                 _, p = self.gender_model(x)
                 results.append(p[0].float().cpu().numpy())
                 weights.append(t2 - t)

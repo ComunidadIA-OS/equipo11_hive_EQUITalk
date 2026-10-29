@@ -1,0 +1,35 @@
+# Demo en cualquier ordenador (CPU):  docker compose up --build demo       ->  http://localhost:7860
+# Demo con GPU NVIDIA:                docker compose up --build demo-gpu   ->  http://localhost:7860
+# Parar la demo:                      Ctrl + C   (o  docker compose down)
+services:
+  demo:
+    build: .
+    image: audio-ai-processor
+    entrypoint: ["python", "app.py"]   # la imagen arranca main.py; aquí se cambia por la demo
+    ports:
+      - "7860:7860"
+    env_file:
+      - .env                           # HF_TOKEN=... (y opcionalmente ASR_MODEL, HF_HUB_OFFLINE)
+    volumes:
+      - ./data:/app/data               # resultados de cada análisis (data/demo_runs)
+      - ./ejemplos:/app/ejemplos       # audios de ejemplo que aparecen como botones
+      - hf_cache:/app/.cache/huggingface   # modelos: se descargan una sola vez
+
+  demo-gpu:                            # igual, pero con la imagen de GPU (requiere NVIDIA Container Toolkit)
+    extends: demo
+    build:
+      context: .
+      args:
+        DEVICE: gpu
+    image: audio-ai-processor-gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf_cache:
+    name: hf_cache                     # el mismo volumen que usa el comando docker run del README

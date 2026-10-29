@@ -22,6 +22,11 @@ pyannote.metrics>=4.2.0
 openpyxl>=3.1.5
 psutil>=7.2.2
 num2words>=0.5.14
+scipy>=1.10.0
 
-# Testing 
+# Demo (interfaz web)
+gradio>=5.0
+matplotlib>=3.8.0
+
+# Testing
 pytest>=9.1.1
