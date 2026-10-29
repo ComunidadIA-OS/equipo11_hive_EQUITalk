@@ -74,7 +74,9 @@ Si no se indica `--gt_dir`, el sistema generará las transcripciones, los perfil
 ├── requirements.txt    # Dependencias
 ├── Dockerfile          # Imagen Docker (versión CPU por defecto, GPU opcional)
 ├── docker-compose.yml  # Arranque de la demo con Docker
-└── .dockerignore       # Archivos excluidos de la imagen Docker
+├── .dockerignore       # Archivos excluidos de la imagen Docker
+├── LICENSE             # Licencia Apache 2.0
+└── NOTICE              # Atribuciones y componentes de terceros
 ```
 
 ---
@@ -347,12 +349,86 @@ Los tests se ejecutan automáticamente con **GitHub Actions** (`.github/workflow
 
 ---
 
-## 8. Licencias de los modelos
+## 8. Licencia y componentes de terceros
+
+### Licencia del proyecto
+
+Todo el código de este repositorio se publica bajo la **[Licencia Apache 2.0](LICENSE)**. Cada archivo de código lo indica en su primera línea:
+
+```python
+# SPDX-License-Identifier: Apache-2.0
+```
+
+**Qué permite:** usar, copiar, modificar y redistribuir el código, también con fines comerciales y dentro de otros proyectos, incluso con una licencia distinta. Además, concede una licencia de las patentes que pudiera haber sobre las contribuciones.
+
+**Qué pide a quien lo reutilice:**
+
+1. Incluir una copia de [`LICENSE`](LICENSE).
+2. Conservar el archivo [`NOTICE`](NOTICE) y los avisos de copyright y licencia de los archivos.
+3. Indicar en los archivos modificados que se han cambiado.
+
+**Qué no ofrece:** garantías ni responsabilidad de las autoras sobre el uso del software, ni derecho a usar el nombre del proyecto o del equipo como marca.
+
+Elegimos Apache 2.0 porque está aprobada por la Open Source Initiative y la Free Software Foundation, es la licencia más habitual en proyectos de IA y es compatible con todas las dependencias del proyecto (ver tablas). Así cualquier organización (por ejemplo, un medio de comunicación o una universidad) puede adoptar y adaptar la herramienta sin trabas.
+
+### Código basado en terceros
+
+| Archivo | Basado en | Licencia |
+|---|---|---|
+| `src/pipeline/age_gender_model.py` | Diseño de `RobertaClassificationHead` de [Hugging Face Transformers](https://github.com/huggingface/transformers) | Apache-2.0 |
+
+`age_gender_model.py` define la arquitectura necesaria para cargar los pesos del modelo de género: un codificador Wav2Vec2 y dos cabezales de clasificación (edad y género). Los nombres de las capas vienen dados por los pesos publicados por audeering, ya que tienen que coincidir para que el modelo se cargue; el test `tests/test_age_gender_model.py` comprueba que coinciden. La atribución está en [`NOTICE`](NOTICE).
+
+### Modelos preentrenados
+
+Los modelos **no se incluyen en el repositorio**: se descargan de Hugging Face la primera vez que se ejecuta el sistema, y quien los descarga acepta sus condiciones de uso.
 
 | Modelo | Uso en el proyecto | Licencia |
 |---|---|---|
 | OpenAI Whisper `large-v3-turbo` (vía Faster Whisper) | Transcripción | MIT |
-| `pyannote/speaker-diarization-3.1` y `pyannote/segmentation-3.0` | Diarización | MIT (requiere aceptar las condiciones en Hugging Face) |
-| `audeering/wav2vec2-large-robust-24-ft-age-gender` | Género | CC BY-NC-SA 4.0 (**solo uso no comercial**) |
+| [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1) y [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0) | Diarización | MIT (requiere aceptar las condiciones en Hugging Face) |
+| [`audeering/wav2vec2-large-robust-24-ft-age-gender`](https://huggingface.co/audeering/wav2vec2-large-robust-24-ft-age-gender) | Género | CC BY-NC-SA 4.0 (**solo uso no comercial**) |
 
-Por la licencia del modelo de género, el sistema completo no puede usarse con fines comerciales.
+> **Importante:** el código es libre para cualquier uso, pero **ejecutar el sistema tal como está configurado solo está permitido con fines no comerciales**, por la licencia de los pesos del modelo de género. Para un uso comercial hay que sustituir ese modelo por otro con licencia compatible (por ejemplo, un clasificador entrenado con datos de licencia abierta como Common Voice, que es CC0). Está previsto en la hoja de ruta.
+
+### Librerías de Python
+
+Todas se instalan desde PyPI con `requirements.txt`; ninguna se incluye en el repositorio.
+
+| Librería | Licencia |
+|---|---|
+| faster-whisper, CTranslate2 | MIT |
+| pyannote.audio, pyannote.metrics | MIT |
+| PyTorch (`torch`) | BSD-3-Clause |
+| torchaudio | BSD-2-Clause |
+| transformers, huggingface_hub | Apache-2.0 |
+| SpeechBrain | Apache-2.0 |
+| pytorch-metric-learning, einops | MIT |
+| omegaconf | BSD-3-Clause |
+| pandas, NumPy, SciPy, scikit-learn | BSD-3-Clause |
+| soundfile | BSD-3-Clause |
+| PyYAML, openpyxl | MIT |
+| jiwer | Apache-2.0 |
+| psutil | BSD-3-Clause |
+| num2words | LGPL-2.1 |
+| Gradio | Apache-2.0 |
+| Matplotlib | Matplotlib License (basada en PSF) |
+| pytest | MIT |
+
+Todas son permisivas y compatibles con Apache 2.0, salvo num2words (LGPL-2.1), que también lo es en este caso: se importa como librería sin modificarla y no se distribuye con el proyecto.
+
+Para comprobar las licencias de las versiones instaladas en tu entorno:
+
+```bash
+pip install pip-licenses
+pip-licenses --from=mixed --format=markdown
+```
+
+### Dependencias del sistema (solo imagen Docker)
+
+| Componente | Licencia |
+|---|---|
+| FFmpeg | LGPL-2.1+ / GPL-2.0+ (según la compilación de Debian) |
+| libsndfile | LGPL-2.1 |
+
+El `Dockerfile` las instala desde los repositorios de Debian al construir la imagen; no se distribuyen en este repositorio. Si se publicara la imagen ya construida, habría que cumplir también las licencias de estos paquetes.

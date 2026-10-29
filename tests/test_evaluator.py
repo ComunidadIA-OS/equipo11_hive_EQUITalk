@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from unittest.mock import MagicMock, mock_open, patch
 import pytest
 from src.evaluation.evaluator import Evaluator

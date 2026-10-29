@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Estructura de carpetas de una ejecución.
 
     <output_root>/<run_name>/

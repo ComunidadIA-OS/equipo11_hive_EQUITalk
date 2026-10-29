@@ -39,7 +39,7 @@ RUN if [ "$DEVICE" = "gpu" ]; then \
 
 # Copia el código fuente principal y la demo
 COPY src/ ./src/
-COPY main.py app.py ./
+COPY main.py app.py LICENSE NOTICE ./
 COPY ejemplos/ ./ejemplos/
 
 # Puerto de la demo (http://localhost:7860)

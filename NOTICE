@@ -1,0 +1,10 @@
+THE HIVE
+Copyright 2026 Equipo 11 – THE HIVE
+
+Desarrollado en el reto «Mujeres por la IA Abierta» de la Comunidad IA de
+Código Abierto.
+
+Este producto incluye código basado en Hugging Face Transformers
+(https://github.com/huggingface/transformers), concretamente en el diseño de
+RobertaClassificationHead, distribuido bajo la Licencia Apache 2.0.
+Copyright The Google AI Language Team Authors and The HuggingFace Inc. team.

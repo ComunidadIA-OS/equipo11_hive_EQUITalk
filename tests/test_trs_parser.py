@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from src.utils.trs_parser import parse_transcriber_file
 
 def test_parse_transcriber_file(tmp_path):

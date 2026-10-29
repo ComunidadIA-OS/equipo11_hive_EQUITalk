@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Demo interactiva de THE HIVE (Equipo 11).
 

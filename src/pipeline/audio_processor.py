@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 import os
 import gc
 import time
@@ -9,15 +11,14 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 import soundfile as sf
 import src.utils.compatibility 
 
 from faster_whisper import WhisperModel
 from pyannote.audio import Pipeline
 from transformers import Wav2Vec2Processor
-from transformers.models.wav2vec2.modeling_wav2vec2 import Wav2Vec2Model, Wav2Vec2PreTrainedModel
 
+from src.pipeline.age_gender_model import AgeGenderWav2Vec2
 from src.utils.exceptions import ModelLoadingError, AudioProcessingError
 from src.utils.profiling import ResourceProfiler
 
@@ -26,35 +27,6 @@ logger = logging.getLogger(__name__)
 SAMPLE_RATE = 16000
 SEGMENT_COLUMNS = ["start_time", "end_time", "speaker_label", "gender", "gender_confidence", "transcript"]
 TURN_COLUMNS = ["start_time", "end_time", "speaker_label", "gender", "gender_confidence"]
-
-
-class ModelHead(nn.Module):
-    """Cabezal de clasificación para el modelo base Wav2Vec2."""
-    def __init__(self, config, num_labels):
-        super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.dropout = nn.Dropout(config.final_dropout)
-        self.out_proj = nn.Linear(config.hidden_size, num_labels)
-
-    def forward(self, x):
-        x = self.dropout(x)
-        x = torch.tanh(self.dense(x))
-        x = self.dropout(x)
-        return self.out_proj(x)
-
-class AgeGenderModel(Wav2Vec2PreTrainedModel):
-    """Modelo preentrenado de HuggingFace adaptado para predicción de edad y género."""
-    def __init__(self, config):
-        super().__init__(config)
-        self.wav2vec2 = Wav2Vec2Model(config)
-        self.age = ModelHead(config, 1)
-        self.gender = ModelHead(config, 3)
-        self.post_init()
-
-    def forward(self, input_values):
-        h = self.wav2vec2(input_values)[0]
-        h = torch.mean(h, dim=1)  # Resumen por chunk de audio
-        return self.age(h), torch.softmax(self.gender(h), dim=1)
 
 
 @dataclass
@@ -133,7 +105,7 @@ class AudioProcessor:
         # 3. Clasificación de género
         name = "audeering/wav2vec2-large-robust-24-ft-age-gender"
         self.gender_proc = Wav2Vec2Processor.from_pretrained(name)
-        self.gender_model = AgeGenderModel.from_pretrained(name).to(self.device, dtype=self.dtype).eval()
+        self.gender_model = AgeGenderWav2Vec2.from_pretrained(name).to(self.device, dtype=self.dtype).eval()
 
     @staticmethod
     def _load_audio(file_path: str) -> np.ndarray:
