@@ -362,7 +362,7 @@ def build_interface():
         guide_state = gr.State(False)
 
         # Botón flotante para alternar el menú
-        guide_state = gr.Button("☰ Guía", elem_id="hive-menu-button")
+        guide_button = gr.Button("☰ Guía", elem_id="hive-menu-button")
 
         # Barra lateral desplegable manejada con visibilidad nativa de Gradio
         with gr.Column(elem_id="hive-sidebar", visible=False) as sidebar:
@@ -460,10 +460,10 @@ def build_interface():
             btn_text = "✕ Cerrar" if new_state else "☰ Guía"
             return new_state, gr.update(visible=new_state), btn_text
 
-        guide_state.click(
+        guide_button.click(
             toggle_menu,
             inputs=[guide_state],
-            outputs=[guide_state, sidebar, guide_state]
+            outputs=[guide_state, sidebar, guide_button]
         )
 
         button.click(
