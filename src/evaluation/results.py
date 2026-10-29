@@ -66,12 +66,12 @@ class FileEvaluation:
             "Interruptions_F2M": pe.interruptions.female_over_male,
             "Interruption_Asymmetry": pe.interruptions.asymmetry_index,
             "Speaking_Gini": pe.speakers.speaking_time_gini,
-            
-            # Nuevas métricas de análisis de turnos y estructura
-            "Opened_By": pe.turns.opened_by if hasattr(pe, "turns") else None,
-            "Closed_By": pe.turns.closed_by if hasattr(pe, "turns") else None,
-            "Longest_Monologue_Speaker": pe.turns.longest_monologue_speaker if hasattr(pe, "turns") else None,
-            "Longest_Monologue_Duration_s": pe.turns.longest_monologue_duration_s if hasattr(pe, "turns") else None,
+            "Opened_By": pe.floor.first_speaker_gender if hasattr(pe, "floor") else None,
+            "Closed_By": pe.floor.last_speaker_gender if hasattr(pe, "floor") else None,
+            "Longest_Monologue_Duration_s": max(
+                (d for d in [pe.turns.max_s_female, pe.turns.max_s_male] if not math.isnan(d)), 
+                default=None
+            ) if hasattr(pe, "turns") else None,
             
             # Equidad (Diferencia vs Referencia, si existe)
             "Time_Female_Pct_Ref": re_.speaking_time.female_pct if self.has_reference else None,
