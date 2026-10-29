@@ -1,4 +1,4 @@
-# THE HIVE (Equipo 11) –  EQUITalk
+# HIVE (Equipo 11) –  EQUITalk
 
 Sistema en Python que analiza grabaciones de voz para **transcribir, identificar quién habla y cuándo, inferir el género de cada hablante y medir la equidad de la conversación** (tiempo de habla, interrupciones, turnos). Opcionalmente compara los resultados del modelo contra transcripciones de referencia (*Ground Truth*, `.trs`) para cuantificar su rendimiento.
 

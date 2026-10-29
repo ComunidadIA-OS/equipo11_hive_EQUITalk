@@ -70,7 +70,7 @@ HELP_MD = f"""
 """
 
 FOOTER_MD = f"""
-**Desarrolladoras:** THE HIVE (Equipo 11): {", ".join(TEAM_MEMBERS)}. | 
+**Desarrolladoras:** HIVE (Equipo 11): {", ".join(TEAM_MEMBERS)}. | 
 **Marco del reto:** Reto "Mujeres por la IA Abierta" (SEDIA, UPC-IDEAI, COEINF-dones, OVHcloud). | 
 **Licencia:** [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 """
@@ -353,7 +353,7 @@ def build_interface():
     """
 
     with gr.Blocks(
-        title="EQUITalk · The Hive",
+        title="EQUITalk · Hive",
         theme=gr.themes.Soft(),
         css=css,
     ) as demo:

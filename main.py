@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Pipeline de inferencia y evaluación de audios (The Hive)"
+        description="Pipeline de inferencia y evaluación de audios"
     )
 
     parser.add_argument(
