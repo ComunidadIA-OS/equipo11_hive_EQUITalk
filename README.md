@@ -432,3 +432,31 @@ pip-licenses --from=mixed --format=markdown
 | libsndfile | LGPL-2.1 |
 
 El `Dockerfile` las instala desde los repositorios de Debian al construir la imagen; no se distribuyen en este repositorio. Si se publicara la imagen ya construida, habría que cumplir también las licencias de estos paquetes.
+
+---
+
+## 9. Hoja de ruta (Roadmap) y Acciones Futuras
+
+El desarrollo evolutivo de **EquiTalk** se estructura en fases orientadas a consolidar su precisión técnica, mantener su naturaleza de código abierto y garantizar un marco estricto de uso responsable y legalidad:
+
+### Fase 1: Estabilización del Core y Transparencia Local (Actual)
+
+* **Consolidación del Pipeline:** Funcionamiento local por defecto (Faster Whisper, Pyannote 3.1, Wav2Vec2) con procesamiento optimizado en CPU/GPU y eliminación automática de archivos temporales.
+* **Métricas Avanzadas:** Integración de análisis de equidad, turnos (quién abre y cierra), monólogos e interrupciones.
+* **Interfaz y Licenciamiento:** Despliegue de la demo local/Docker (Gradio) y cumplimiento de licencias abiertas (Apache 2.0 y control de restricciones no comerciales del modelo de género actual).
+
+### Fase 2: Validación Metodológica y Marcos Legales
+
+* **Ground Truth de Interrupciones:** Ampliación de datasets de referencia específicos para afinar la validación de solapamientos e interrupciones.
+* **Términos y Condiciones (*Terms of Service*):** Implementación de la **aceptación obligatoria de términos de uso en la interfaz** antes de permitir procesar cualquier archivo de audio, reforzando el cumplimiento legal frente al acto de grabar.
+* **Asimetría y Sesgos:** Incorporación de intervalos de confianza en los índices de asimetría y auditoría continua de sesgos demográficos (acento, edad, ruido).
+
+### Fase 3: Evolución Tecnológica (De cara al futuro)
+
+* **Modelo de Género Abierto:** Investigación y sustitución del clasificador de género actual por un modelo entrenado con licencias abiertas y comerciales (ej. Common Voice bajo licencia CC0) para eliminar restricciones de uso.
+* **API Remota Opcional en la UE:** Planificación de una pasarela de inferencia en la nube como alternativa para equipos sin recursos locales de GPU, condicionada estrictamente a **garantías contractuales en la Unión Europea**, aviso previo transparente al usuario y total cancelabilidad del envío.
+
+### Fase 4: Privacidad por Diseño y Reportes Ejecutivos
+
+* **Informes Agregados y Anonimizados:** Priorización de exportaciones de métricas sin datos nominales ni transcripciones literales innecesarias por defecto.
+* **Despliegue Piloto Controlado:** Pruebas de campo con usuarios para evaluar fricciones de usabilidad y cumplimiento riguroso de normativas de protección de datos (RGPD / LOPDGDD).
