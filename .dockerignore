@@ -1,0 +1,20 @@
+# Entornos y credenciales
+.env
+.gitignore
+
+# Jupyter y Notebooks
+.ipynb_checkpoints/
+notebooks/
+**/*.ipynb
+
+# Caché de Python y Tests
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+pytest.ini
+tests/
+
+# Documentación
+**/*.md
+!README.md

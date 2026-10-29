@@ -1,135 +1,238 @@
-# THE HIVE (Equipo 11) - Detector de Interrupciones y Evaluador
+# THE HIVE (Equipo 11) – Detector de Interrupciones
 
-Sistema en Python optimizado para procesar contenidos audiovisuales de voz, extraer transcripciones, diarizar hablantes y clasificar géneros mediante aprendizaje profundo. Incluye un módulo completo de evaluación para contrastar el rendimiento del modelo (ASR, Diarización, Clasificación) contra transcripciones de referencia (*Ground Truth* en formato `.trs`) y calcular métricas de equidad.
+Sistema en Python que analiza grabaciones de voz para **transcribir, identificar quién habla y cuándo, inferir el género de cada hablante y medir la equidad de la conversación** (tiempo de habla, interrupciones, turnos). Opcionalmente compara los resultados del modelo contra transcripciones de referencia (*Ground Truth*, `.trs`) para cuantificar su rendimiento.
 
 ---
 
-## Estructura del Proyecto
+## 1. ¿Qué hace el sistema?
+
+El flujo tiene dos etapas, orquestadas desde `main.py`:
+
 ```text
-gender_voice_metrics/
-├── data/
-│   ├── raw/
-│   │   ├── audio/          # Audios de prueba (.wav)
-│   │   └── trs/            # Archivos Ground Truth (.trs / XML)
-│   ├── interim/            # Transcripciones y predicciones generadas (.csv)
-│   └── processed/          # Resultados de evaluación finales (.xlsx)
-├── src/
-│   ├── pipeline/           # Procesamiento de audio y ejecución por lotes
-│   ├── metrics/            # Lógica matemática (rendimiento IA y equidad)
-│   ├── evaluation/         # Validación contra Ground Truth (Batch Evaluator)
-│   └── utils/              # Parsers (XML/TRS), logger y excepciones
-├── tests/                  # Pruebas unitarias e integración con pytest
-├── main.py                 # Orquestador principal 
-├── requirements.txt        # Dependencias del sistema
-└── README.md
+ Audios (.wav)                                         Ground Truth (.trs / .xml)
+      │                                                          │
+      ▼                                                          │ (opcional)
+┌───────────────────────────── 1. INFERENCIA (GPU) ─────────┐    │
+│  Faster Whisper → transcripción (ASR)                     │    │
+│  Pyannote 3.1   → diarización (quién habla y cuándo)      │    │
+│  Wav2Vec2       → clasificación de género por hablante    │    │
+└───────────────────────────┬───────────────────────────────┘    │
+                            ▼                                    ▼
+                    Predicciones por audio ──────► 2. EVALUACIÓN ◄┘
+                                                          │
+                                                          ▼
+                                       Excel + JSON con métricas
 ```
+
+1. **Inferencia** (`src/pipeline/`): procesa cada audio en paralelo, repartiendo el trabajo entre las GPUs disponibles.
+2. **Evaluación** (`src/evaluation/`, `src/metrics/`): calcula las métricas de equidad a partir de las predicciones y, si se proporciona Ground Truth, también las métricas de rendimiento de la IA.
+
+Si no se indica --gt_dir, el sistema generará las transcripciones, los perfiles de hardware (tiempo, RAM, GPU) y las métricas de equidad, pero omitirá las métricas de precisión (WER, DER) al no tener transcripciones humanas de referencia.
+
+### Modelos utilizados
+
+| Tarea | Modelo / librería |
+|---|---|
+| Transcripción (ASR) | Faster Whisper |
+| Diarización | `pyannote/speaker-diarization-3.1` + `pyannote/segmentation-3.0` |
+| Género | `audeering/wav2vec2-large-robust-24-ft-age-gender` |
+
+### Métricas generadas
+
+**Rendimiento de la IA** (`PerformanceResult`, requiere Ground Truth)
+- **ASR:** WER (*Word Error Rate*) y CER (*Character Error Rate*).
+- **Diarización:** DER (*Diarization Error Rate*), desglosado en *Missed Detection*, *False Alarm* y *Confusion*.
+- **Género:** precisión (*accuracy*), sensibilidad (*recall*) y cobertura.
+
+**Equidad e interacciones** (`EquityMetrics`)
+- **Tiempo de habla:** porcentaje por género y solapamientos.
+- **Interrupciones:** cortes detectados (`male_over_female`, `female_over_male`) e índice de asimetría.
+- **Turnos y participación:** monólogos más largos, brecha de participación y ratio de toma de palabra (transiciones).
+
+**Recursos** (`TimingMetrics`)
+- Tiempo de ejecución por etapa (ASR, diarización, género).
+- RTF (*Real Time Factor*).
+- Picos de memoria RAM y VRAM (GPU).
+
+### Estructura del proyecto
+
+```text
+.
+├── src/
+│   ├── evaluation/   # Validación contra Ground Truth (evaluator.py, batch_evaluator.py)
+│   ├── metrics/      # Cálculo de rendimiento IA y equidad (performance.py, equity.py)
+│   ├── pipeline/     # Procesamiento de audio, inferencia y paralelismo (audio_processor.py, batch_runner.py)
+│   └── utils/        # Parsers (XML/TRS), logger, configuración, rutas (paths.py) y excepciones
+├── tests/            # Pruebas unitarias e integración (pytest)
+├── main.py           # Orquestador principal (CLI)
+├── pytest.ini        # Configuración de pruebas
+├── requirements.txt  # Dependencias
+├── Dockerfile        # Contenedorización
+└── .dockerignore     # Archivos excluidos de la imagen Docker
+```
+
 ---
 
-## Configuración del Entorno
+## 2. Requisitos previos
 
-1. **Clonar el repositorio y crear un entorno virtual:**
+- **Python 3.11** (la misma versión que usa la imagen Docker).
+- **GPU NVIDIA con CUDA** para la inferencia (recomendado). Para Docker se necesita además el [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+- **ffmpeg** instalado en el sistema (solo para instalación local; la imagen Docker ya lo incluye).
+- **Cuenta en Hugging Face** con token de acceso.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-```
+### Acceso a los modelos de Hugging Face
 
-2. **Instalar las dependencias del proyecto:**
+Inicia sesión en Hugging Face y **acepta las condiciones de uso** de estos modelos:
 
-```bash
-pip install -r requirements.txt
-```
+1. [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+2. [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+3. [audeering/wav2vec2-large-robust-24-ft-age-gender](https://huggingface.co/audeering/wav2vec2-large-robust-24-ft-age-gender)
 
-3. **Configurar las credenciales de Hugging Face:**
-Crea un archivo llamado `.env` en la raíz del proyecto y añade el token necesario para el modelo de `pyannote.audio`:
+Luego crea un archivo `.env` en la raíz del proyecto con tu token (sin comillas):
 
 ```text
 HF_TOKEN=tu_token_aqui
 ```
 
-4. **Carga el token en la terminal con el comando correspondiente:**
-
-   * **Linux y macOS (Bash / Zsh):**
-     ```bash
-     export $(grep -v '^#' .env | xargs)
-     ```
-
-   * **Windows (PowerShell):**
-     ```powershell
-     Get-Content .env | Where-Object { $_ -match '=' -and -not$_.StartsWith('#') } | ForEach-Object {
-         $name, $value =$_.Split('=', 2)
-         [Environment]::SetEnvironmentVariable($name.Trim(),$value.Trim(), 'Process')
-     }
-     ```
 ---
 
-## Uso del Sistema 
+## 3. Instalación local
 
-El proyecto se orquesta ahora desde un punto de entrada centralizado (`main.py`) que permite ejecutar la inferencia mediante GPU y la evaluación posterior de forma consecutiva o aislada.
-
-1. **Ejecución del Pipeline Completo (Inferencia + Evaluación)**
-
-Ejecuta los modelos sobre los audios, genera los CSVs temporales y, a continuación, los cruza con los archivos `.trs` de referencia para exportar el Excel de métricas.
+**1. Crear y activar un entorno virtual**
 
 ```bash
-python main.py --audio_dir data/raw/audio --gt_dir data/raw/trs
+python -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
 ```
 
-2. **Evaluación Rápida (Saltar Inferencia)**
-
-Si ya tienes las predicciones `.csv` generadas en ejecuciones anteriores y solo necesitas recalcular el Excel de métricas (por ejemplo, si has ajustado el cálculo de solapamientos), usa el flag `--skip_inference`:
+**2. Instalar dependencias**
 
 ```bash
-python main.py --audio_dir data/raw/audio --gt_dir data/raw/trs --skip_inference
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-**3. Configuración Avanzada de Parámetros**
+**3. Cargar las variables de entorno**
 
-Puedes personalizar el número de GPUs concurrentes, los directorios de salida y el nombre del archivo final de Excel:
+```bash
+# Linux / macOS
+export $(grep -v '^#' .env | xargs)
+```
+
+```powershell
+# Windows (PowerShell)
+Get-Content .env | Where-Object { $_ -match '=' -and -not $_.StartsWith('#') } | ForEach-Object {
+    $name, $value = $_.Split('=', 2)
+    [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim(), 'Process')
+}
+```
+
+---
+
+## 4. Uso
+
+Todo se ejecuta con `main.py`. Puedes correr inferencia y evaluación juntas o por separado.
+
+### Parámetros
+
+| Parámetro | Requerido | Por defecto | Descripción |
+|---|---|---|---|
+| `--audio_dir` | Sí, salvo con `--skip_inference` | – | Directorio con los audios (`.wav`) a procesar. |
+| `--gt_dir` | No | – | Directorio del Ground Truth (`.trs` o `.xml`). Si se omite, solo se evalúa equidad. |
+| `--out_dir` | No | `data/processed` | Directorio raíz de resultados. |
+| `--run_name` | No | `evaluation_run` | Nombre de la ejecución; crea la carpeta `<out_dir>/<run_name>/`. |
+| `--num_gpus` | No | `2` | Número de GPUs a usar en la inferencia. |
+| `--skip_inference` | No | `False` | Omite la inferencia y evalúa con las predicciones ya existentes en la carpeta del run. |
+
+### Ejemplos
+
+**1. Pipeline completo (inferencia + evaluación)**
+
+```bash
+python main.py --audio_dir data/raw/audio --gt_dir data/ground_truth/trs
+```
+
+**2. Ejecución personalizada**
 
 ```bash
 python main.py \
     --audio_dir data/raw/agora \
-    --gt_dir data/raw/agora \
-    --pred_dir data/predictions \
+    --gt_dir data/ground_truth/agora \
     --out_dir data/processed \
-    --out_filename metricas_agora_v1.xlsx \
-    --num_gpus 4
+    --run_name metricas_agora_v1 \
+    --num_gpus 2
 ```
+
+**3. Solo equidad (sin Ground Truth)**
+
+```bash
+python main.py --audio_dir data/raw/audio --run_name solo_equidad
+```
+
+**4. Evaluación rápida (saltar inferencia)**
+
+Recalcula las métricas a partir de predicciones generadas previamente. Usa el **mismo** `--out_dir` y `--run_name` de la ejecución original, ya que de ahí se leen las predicciones.
+
+```bash
+python main.py \
+    --gt_dir data/raw/trs \
+    --run_name metricas_agora_v1 \
+    --skip_inference
+```
+
+> Con `--skip_inference` no hace falta `--audio_dir`.
+
+### Resultados
+
+Cada ejecución crea `<out_dir>/<run_name>/`, que contiene las predicciones por audio y los reportes de métricas en **Excel y JSON** (ver [Métricas generadas](#métricas-generadas)).
 
 ---
 
-## Métricas Exportadas
+## 5. Ejecución con Docker
 
-El archivo Excel generado en `data/processed/` contiene las siguientes evaluaciones aplanadas por cada archivo de audio:
+La imagen define `main.py` como *entrypoint*, por lo que **solo debes pasar los argumentos** del programa (sin escribir `python main.py`).
 
-* **Rendimiento del Modelo (IA):**
-* `ASR_WER` y `ASR_CER`: Word/Character Error Rate.
-* `DER (Diarization)`: Tasa de error en la identificación de turnos de hablantes.
-* `Gender_Accuracy / Sensitivity / Precision`: Rendimiento de la clasificación de género alineada temporalmente con el *Ground Truth*.
+**1. Construir la imagen**
 
-* **Dinámicas de Equidad (Sociolingüística):**
-* `Time_Female_Pct` y `Time_Male_Pct`: Porcentaje de tiempo de uso de la palabra.
-* `Interruptions_M2F`: Conteo de interrupciones directas de hablantes masculinos hacia hablantes femeninas.
+```bash
+docker build -t audio-ai-processor .
+```
 
-* **Tiempo y Memoria (Inferencia):** se leen de `<audio>_metadata.json`, que la inferencia guarda junto a cada CSV.
-* `Time_total_s` y `RTF_total`: segundos de procesamiento y *Real Time Factor* (segundos de cómputo por segundo de audio; <1 es más rápido que tiempo real).
-* `Time_ASR_s`, `Time_Diarization_s`, `Time_Gender_s`: segundos de cada etapa del pipeline.
-* `Model_load_s`: segundos de carga de los modelos (una vez por GPU).
-* `RAM_peak_MB`: pico de RAM del proceso hasta terminar ese audio (incluye los modelos cargados).
-* `GPU_peak_MB`: memoria máxima de la tarjeta gráfica que necesita el pipeline (incluye los tres modelos, también Whisper). El detalle por etapa está en el `_metadata.json`.
+**2. Ver la ayuda**
+
+```bash
+docker run --rm audio-ai-processor
+```
+
+**3. Ejecutar el pipeline completo**
+
+Los volúmenes (`-v`) conectan tus carpetas locales con el contenedor. El volumen `hf_cache` guarda los modelos descargados para no volver a bajarlos en cada ejecución.
+
+```bash
+docker run --rm -it --gpus all --shm-size=2g \
+  --env-file .env \
+  -v $(pwd)/data/audio:/app/audios \
+  -v $(pwd)/data/trs:/app/gt \
+  -v $(pwd)/data/procesado:/app/resultados \
+  -v hf_cache:/app/.cache/huggingface \
+  audio-ai-processor \
+    --audio_dir /app/audios \
+    --gt_dir /app/gt \
+    --out_dir /app/resultados \
+    --run_name evaluacion_docker \
+    --num_gpus 1
+```
+
+Notas:
+- `--shm-size=2g` evita errores de memoria compartida cuando se procesa en paralelo.
+- Ajusta `--num_gpus` a las GPUs expuestas al contenedor.
+- Los archivos generados pertenecen a `root`; si necesitas otro propietario, ajústalo con `chown` después de la ejecución.
+- `--env-file` requiere el formato `HF_TOKEN=valor`, sin comillas.
 
 ---
 
-## Ejecución de Pruebas Unitarias
+## 6. Pruebas
 
-Para validar los módulos de forma aislada mediante `pytest`:
 ```bash
-python -m pytest tests/ -v -s
-```
-
-Ejecutar un archivo de pruebas específico:
-```bash
-python -m pytest tests/test_performance.py -v
+pytest tests/ -v
 ```
