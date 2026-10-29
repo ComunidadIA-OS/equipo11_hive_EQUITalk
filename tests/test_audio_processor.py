@@ -2,6 +2,7 @@ import pytest
 import numpy as np
 import pandas as pd
 import soundfile as sf
+import torch
 from unittest.mock import patch, MagicMock
 
 from src.pipeline.audio_processor import AudioProcessor, ProcessingOutput
@@ -13,6 +14,9 @@ def mock_processor(mock_load):
     processor = AudioProcessor(gpu_index=0, hf_token="dummy", language="ca")
     processor.model_load_seconds = 0.5 # Simulamos el tiempo de carga
     
+    # Forzamos el uso de CPU para que no falle en GitHub Actions al no detectar CUDA
+    processor.device = torch.device("cpu")
+    
     # Reemplazamos los modelos con Mocks para simular sus salidas
     processor.asr_model = MagicMock()
     processor.dia_pipe = MagicMock()
@@ -23,7 +27,7 @@ def mock_processor(mock_load):
 
 @pytest.fixture
 def dummy_wav_file(tmp_path):
-    """Genera un archivo .wav de silencio de 3 segundos al vuelo para el test[cite: 1]."""
+    """Genera un archivo .wav de silencio de 3 segundos al vuelo para el test."""
     file_path = tmp_path / "test_audio.wav"
     # Audio mono de 3 segundos a 16kHz
     dummy_audio = np.zeros(16000 * 3, dtype="float32")
@@ -58,7 +62,7 @@ def test_assignment_and_classification_logic(mock_processor):
             # SPEAKER_00: Mujer (índice 0 en CLASSES = ["female", "male", "child"])
             return np.array([0.9, 0.1, 0.0]), (end - start)
         else:
-            # SPEAKER_01: Hombre (índice 1)[
+            # SPEAKER_01: Hombre (índice 1)
             return np.array([0.1, 0.8, 0.1]), (end - start)
             
     mock_processor._get_gender_probs = mock_get_gender_probs
@@ -83,7 +87,7 @@ def test_assignment_and_classification_logic(mock_processor):
     assert turns_df.iloc[1]["gender"] == "male"
 
 def test_process_file_end_to_end_mocked(mock_processor, dummy_wav_file):
-    """Prueba que el pipeline completo fluye correctamente con un archivo simulado y devuelve la dataclass esperada[cite: 1]."""
+    """Prueba que el pipeline completo fluye correctamente con un archivo simulado y devuelve la dataclass esperada."""
     
     # 1. Simular la respuesta de Whisper (generador + info object)
     class MockSegment:
