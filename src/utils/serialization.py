@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 import math
 from dataclasses import asdict, is_dataclass
 from typing import Any, Dict

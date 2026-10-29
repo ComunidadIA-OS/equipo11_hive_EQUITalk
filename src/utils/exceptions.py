@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 class AudioPipelineError(Exception):
     """Excepción base para errores en el pipeline de procesamiento de audio."""
     pass

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from src.utils.text_normalizer import basic_normalize, normalize_text 
 
 def test_basic_normalize():

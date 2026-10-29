@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Medición de tiempo y memoria (RAM y GPU) por etapa del pipeline.
 
 Uso:

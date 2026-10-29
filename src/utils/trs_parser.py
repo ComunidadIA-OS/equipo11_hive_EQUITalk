@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 import xml.etree.ElementTree as ET
 from typing import Dict, List
 

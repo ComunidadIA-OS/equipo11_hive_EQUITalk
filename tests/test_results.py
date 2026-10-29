@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from src.metrics.equity import EquityMetrics
 from src.metrics.performance import PerformanceResult, ASRMetrics, TimingMetrics
 from src.evaluation.results import _is_num, EquityComparison, FileEvaluation
