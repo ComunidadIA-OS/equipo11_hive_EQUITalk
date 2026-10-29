@@ -21,8 +21,9 @@ def parse_args():
     parser.add_argument(
         "--audio_dir",
         type=str,
-        required=True,
-        help="Directorio con los archivos de audio (.wav) para procesar.",
+        default=None,
+        help="Directorio con los archivos de audio (.wav) para procesar. "
+             "Obligatorio salvo que se use --skip_inference.",
     )
 
     parser.add_argument(
@@ -59,7 +60,12 @@ def parse_args():
         help="Salta la generación de predicciones y corre directamente la evaluación usando los datos existentes.",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if not args.skip_inference and not args.audio_dir:
+        parser.error("--audio_dir es obligatorio a menos que se use --skip_inference.")
+
+    return args
 
 
 def main():
