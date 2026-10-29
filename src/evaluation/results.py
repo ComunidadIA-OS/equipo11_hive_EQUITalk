@@ -1,3 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+
+import math
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
+
+from src.metrics.equity import EquityMetrics
+from src.metrics.performance import PerformanceResult
+from src.utils.serialization import flatten_dict, to_serializable
+
+def _is_num(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and not math.isnan(x)
+
+@dataclass
+class EquityComparison:
+    """
+    Equidad medida en la predicción, en la referencia (TRS) opcional y su diferencia.
+    """
+    prediction: EquityMetrics = field(default_factory=EquityMetrics)
+    reference: EquityMetrics = field(default_factory=EquityMetrics)
+    error: Dict[str, float] = field(default_factory=dict)
+
+    @classmethod
+    def build(cls, prediction: EquityMetrics, reference: EquityMetrics) -> "EquityComparison":
+        p = flatten_dict(prediction.to_dict())
+        r = flatten_dict(reference.to_dict())
+        err = {k: p[k] - r[k] for k in p if k in r and _is_num(p[k]) and _is_num(r[k])}
+        return cls(prediction, reference, err)
+
+
+@dataclass
+class FileEvaluation:
+    file: str
+    performance: PerformanceResult = field(default_factory=PerformanceResult)
+    equity: EquityComparison = field(default_factory=EquityComparison)
+    has_reference: bool = False
+    notes: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return to_serializable(self)
+
 def summary_row(self) -> Dict[str, Any]:
         """Fila plana con las métricas clave para la hoja 'Summary' del Excel."""
         p, eq = self.performance, self.equity
