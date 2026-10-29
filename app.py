@@ -1,18 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-Demo interactiva de THE HIVE (Equipo 11).
-
-Interfaz web (Gradio) para analizar un audio de forma visual:
-subir o grabar un audio -> transcripción + diarización + género -> métricas de equidad
-(tiempo de palabra, interrupciones...) y, si se adjunta un .trs, evaluación contra la referencia.
-
-Reutiliza el mismo código que main.py (AudioProcessor + Evaluator), así que los
-resultados de la demo son los mismos que los del pipeline por lotes.
-
-Uso:
-    export HF_TOKEN=tu_token
-    python app.py                  # abre http://localhost:7860
-"""
 import json
 import math
 import os
@@ -41,46 +27,68 @@ from src.utils.paths import RunPaths
 OUTPUT_ROOT = os.environ.get("DEMO_OUTPUT_DIR", "data/demo_runs")
 EXAMPLES_DIR = Path(os.environ.get("DEMO_EXAMPLES_DIR", "ejemplos"))
 GPU_INDEX = int(os.environ.get("GPU_INDEX", "0"))
-# "auto": GPU si la hay, si no CPU. Se puede forzar con DEMO_DEVICE=cpu o DEMO_DEVICE=cuda
 DEVICE = os.environ.get("DEMO_DEVICE", "auto")
-# Modelo de Whisper. En un portátil sin GPU, "small" o "medium" van mucho más rápido (transcriben algo peor)
 ASR_MODEL = os.environ.get("ASR_MODEL", "large-v3-turbo")
 
 LANGUAGES: Dict[str, Optional[str]] = {
     "Catalán": "ca",
     "Castellano": "es",
     "Gallego": "gl",
+    "Inglés": "en",
     "Detección automática": None,
 }
 
-GENDER_LABELS = {"female": "Mujer", "male": "Hombre", "child": "Infantil", "unknown": "Desconocido"}
-GENDER_COLORS = {"female": "#7B3FA0", "male": "#E09F3E", "child": "#4C9F70", "unknown": "#A0A0A0"}
+GENDER_LABELS = {"female": "Mujer", "male": "Hombre", "unknown": "Desconocido"}
+GENDER_COLORS = {"female": "#7B3FA0", "male": "#E09F3E", "unknown": "#A0A0A0"}
 
-# Mismos parámetros que EquityCalculator.compute para que la tabla cuadre con las métricas
+TEAM_MEMBERS = [
+    "María Mira Calvete",
+    "Gema Pérez Gálvez",
+    "Sonia Orós Navas",
+]
+
 MIN_UNIT_S = 0.3
 OVERLAP_THRESHOLD_S = 0.5
 
+HELP_MD = f"""
+### Guía y glosario
+
+**1. Cómo usar la herramienta**
+- **Aporta un audio:** súbelo, grábalo con el micrófono o elige un ejemplo.
+- **Selecciona el idioma** (catalán, castellano, gallego, inglés o automático).
+
+**2. Métricas clave**
+- **Tiempo de habla:** % del tiempo con voz por género.
+- **Turnos:** número de intervenciones seguidas.
+- **Interrupción:** solape de al menos {OVERLAP_THRESHOLD_S}s donde se gana la palabra (excluye ruidos < {MIN_UNIT_S}s).
+- **Índice de asimetría:** >0 (hombres interrumpen más), <0 (al revés).
+- **Rol de apertura/cierre:** quién empieza y termina.
+
+**3. Referencia (.trs) y Límites**
+- Mide **WER** (transcripción), **DER** (diarización) y **acierto de género**.
+- El género se **estima automáticamente por la voz** (categorías binarias/infantil), lo que es una aproximación estadística.
+"""
+
+FOOTER_MD = f"""
+**Desarrolladoras:** THE HIVE (Equipo 11): {", ".join(TEAM_MEMBERS)}. | 
+**Marco del reto:** Reto "Mujeres por la IA Abierta" (SEDIA, UPC-IDEAI, COEINF-dones, OVHcloud). | 
+**Licencia:** [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+"""
 
 # Carga de modelos (una sola vez)
 # ----------------------------------------------------------------------------
 _processor = None
 _processor_lock = threading.Lock()
 
-
 def get_processor():
-    """Carga los modelos la primera vez y los reutiliza en cada análisis."""
     global _processor
     with _processor_lock:
         if _processor is None:
-            from src.pipeline.audio_processor import AudioProcessor  # import pesado: solo cuando hace falta
-
+            from src.pipeline.audio_processor import AudioProcessor
             _processor = AudioProcessor(gpu_index=GPU_INDEX, hf_token=os.environ.get("HF_TOKEN"),
                                         device=DEVICE, asr_model_name=ASR_MODEL)
         return _processor
 
-
-# Lógica del análisis (sin dependencias de la interfaz)
-# ----------------------------------------------------------------------------
 @dataclass
 class DemoResult:
     evaluation: FileEvaluation
@@ -89,26 +97,20 @@ class DemoResult:
     interruptions: pd.DataFrame
     files: List[str]
 
-
 def save_outputs(output, paths: RunPaths, stem: str) -> Path:
-    """Guarda las predicciones con la misma estructura que BatchRunner."""
     output.segments.to_csv(paths.segments_csv(stem), index=False)
     output.turns.to_csv(paths.diarization_csv(stem), index=False)
     with open(paths.metadata_json(stem), "w", encoding="utf-8") as f:
         json.dump(output.metadata, f, indent=2, ensure_ascii=False)
     return paths.segments_csv(stem)
 
-
 def real_interruptions(segments: pd.DataFrame, turns: pd.DataFrame) -> pd.DataFrame:
-    """Interrupciones con los mismos filtros que las métricas (sin ruido ni asentimientos)."""
     units = EquityCalculator._prepare(turns if turns is not None and not turns.empty else segments)
     units = units[units["duration"] >= MIN_UNIT_S].reset_index(drop=True)
     events = EquityCalculator.detect_interruptions(units, OVERLAP_THRESHOLD_S)
     return events[events["takes_floor"]].reset_index(drop=True)
 
-
 def run_analysis(audio_path: str, trs_path: Optional[str], language: Optional[str], processor=None) -> DemoResult:
-    """Procesa un audio, guarda los resultados y lo evalúa (contra el .trs si se adjunta)."""
     processor = processor or get_processor()
     processor.language = language
 
@@ -135,19 +137,14 @@ def run_analysis(audio_path: str, trs_path: Optional[str], language: Optional[st
         files=files,
     )
 
-
-# Presentación de resultados
-# ----------------------------------------------------------------------------
 def _fmt(x, suffix: str = "", decimals: int = 1) -> str:
     if x is None or (isinstance(x, float) and math.isnan(x)):
         return "—"
     return f"{x:.{decimals}f}{suffix}"
 
-
 def _mmss(seconds: float) -> str:
     seconds = max(0, int(round(seconds)))
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
-
 
 def summary_markdown(ev: FileEvaluation) -> str:
     p = ev.equity.prediction
@@ -195,9 +192,7 @@ def summary_markdown(ev: FileEvaluation) -> str:
                       f"Idioma usado por Whisper: {lang}._"]
     return "\n".join(lines)
 
-
 def timeline_figure(turns: pd.DataFrame, interruptions: pd.DataFrame):
-    """Línea de tiempo: una fila por hablante, coloreada por género, con las interrupciones marcadas."""
     fig, ax = plt.subplots(figsize=(11, 0.6 * max(turns["speaker_label"].nunique(), 2) + 1.4))
     if turns.empty:
         ax.text(0.5, 0.5, "No se ha detectado habla", ha="center", va="center", transform=ax.transAxes)
@@ -228,9 +223,7 @@ def timeline_figure(turns: pd.DataFrame, interruptions: pd.DataFrame):
     fig.tight_layout()
     return fig
 
-
 def distribution_figure(ev: FileEvaluation):
-    """Reparto mujeres/hombres (tiempo, palabras, hablantes, turnos) y evolución por cuartos."""
     p = ev.equity.prediction
     shares = {
         "Tiempo": p.speaking_time.female_pct,
@@ -255,7 +248,7 @@ def distribution_figure(ev: FileEvaluation):
     q_names = list(quarters) or ["q1", "q2", "q3", "q4"]
     q_vals = [0 if (quarters.get(q) is None or math.isnan(quarters.get(q))) else quarters[q] for q in q_names]
     ax2.bar([q.upper() for q in q_names], q_vals, color=GENDER_COLORS["female"])
-    ax2.axhline(50, color="black", lw=0.8, ls="--")
+    ax2.axvline(50, color="black", lw=0.8, ls="--")
     ax2.set_ylim(0, 100)
     ax2.set_title("% de tiempo de mujeres por cuarto del audio")
 
@@ -263,7 +256,6 @@ def distribution_figure(ev: FileEvaluation):
         ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
     return fig
-
 
 def transcript_table(segments: pd.DataFrame) -> pd.DataFrame:
     if segments.empty:
@@ -275,7 +267,6 @@ def transcript_table(segments: pd.DataFrame) -> pd.DataFrame:
         "Género": segments["gender"].map(lambda g: GENDER_LABELS.get(g, g)),
         "Texto": segments["transcript"],
     })
-
 
 def interruptions_table(events: pd.DataFrame) -> pd.DataFrame:
     if events.empty:
@@ -289,7 +280,6 @@ def interruptions_table(events: pd.DataFrame) -> pd.DataFrame:
         "Solape (s)": events["overlap_s"].round(2),
     })
 
-
 # Interfaz
 # ----------------------------------------------------------------------------
 def build_interface():
@@ -298,14 +288,18 @@ def build_interface():
     def on_analyze(audio_path, trs_file, language_name, progress=gr.Progress()):
         if not audio_path:
             raise gr.Error("Sube o graba un audio antes de analizar.")
+
         progress(0.05, desc="Cargando modelos (solo la primera vez)...")
+
         try:
             get_processor()
             progress(0.2, desc="Transcribiendo, separando hablantes y detectando género...")
             res = run_analysis(audio_path, trs_file, LANGUAGES[language_name])
         except Exception as e:
             raise gr.Error(f"No se ha podido analizar el audio: {e}")
+
         plt.close("all")
+
         return (
             summary_markdown(res.evaluation),
             distribution_figure(res.evaluation),
@@ -315,48 +309,178 @@ def build_interface():
             res.files,
         )
 
-    with gr.Blocks(title="THE HIVE · Demo", theme=gr.themes.Soft()) as demo:
-        gr.Markdown(
-            "# THE HIVE · ¿Quién tiene la palabra?\n"
-            "Sube o graba un audio con varias personas hablando. El sistema transcribe, separa a las "
-            "personas que hablan, detecta si la voz es de mujer o de hombre y calcula cuánto protagonismo "
-            "tiene cada una: tiempo de palabra, turnos e interrupciones."
+    css = """
+    #hive-menu-button {
+        position: fixed !important;
+        top: 12px;
+        left: 12px;
+        z-index: 10002;
+        width: auto !important;
+        min-width: 48px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+    }
+
+    #hive-sidebar {
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        width: 320px !important;
+        max-width: 85vw;
+        height: 100vh;
+        overflow-y: auto;
+        box-sizing: border-box;
+        padding: 65px 22px 24px 22px !important;
+        background: var(--background-fill-primary);
+        border-right: 1px solid var(--border-color-primary);
+        box-shadow: 5px 0 25px rgba(0,0,0,0.15);
+        z-index: 10001;
+        /* Usamos visibility y opacity controladas desde Gradio o clases limpias */
+    }
+
+    #hive-main {
+        padding-top: 48px;
+        min-width: 0;
+    }
+
+    #hive-footer {
+        border-top: 1px solid var(--border-color-primary);
+        margin-top: 28px;
+        padding: 20px 10px;
+        text-align: center;
+        font-size: 13px;
+        opacity: 0.85;
+    }
+    """
+
+    with gr.Blocks(
+        title="EQUITalk · The Hive",
+        theme=gr.themes.Soft(),
+        css=css,
+    ) as demo:
+
+        # Estado para controlar si la guía está abierta o cerrada (True/False)
+        guide_state = gr.State(False)
+
+        # Botón flotante para alternar el menú
+        guide_state = gr.Button("☰ Guía", elem_id="hive-menu-button")
+
+        # Barra lateral desplegable manejada con visibilidad nativa de Gradio
+        with gr.Column(elem_id="hive-sidebar", visible=False) as sidebar:
+            gr.Markdown(HELP_MD)
+            gr.Markdown("---")
+            gr.Markdown("### Funcionalidades")
+            gr.Markdown(
+                "- 🎙️ Análisis de audio\n"
+                "- 📝 Transcripción\n"
+                "- 👥 Diarización de hablantes\n"
+                "- ⚖️ Métricas de equidad\n"
+                "- ↔️ Detección de interrupciones\n"
+                "- 📊 Comparación con referencia `.trs`"
+            )
+            gr.Markdown("---")
+            gr.Markdown("[Licencia Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0)")
+
+        # Contenido principal
+        with gr.Column(elem_id="hive-main"):
+
+            gr.Markdown(
+                "# EQUITalk\n"
+                "Sube o graba un audio con varias personas hablando. "
+                "El sistema transcribe, separa a los hablantes, estima "
+                "el género vocal y calcula el tiempo de palabra, "
+                "los turnos y las interrupciones."
+            )
+
+            with gr.Row():
+
+                with gr.Column(scale=1):
+                    audio = gr.Audio(
+                        sources=["upload", "microphone"],
+                        type="filepath",
+                        label="Audio"
+                    )
+
+                    language = gr.Dropdown(
+                        list(LANGUAGES),
+                        value="Catalán",
+                        label="Idioma del audio"
+                    )
+
+                    trs = gr.File(
+                        file_types=[".trs", ".xml"],
+                        type="filepath",
+                        label="Referencia .trs (opcional)"
+                    )
+
+                    button = gr.Button("Analizar", variant="primary")
+
+                    gr.Markdown(
+                        "_El idioma afecta a la transcripción y al "
+                        "porcentaje de palabras. El tiempo de palabra, "
+                        "los turnos y las interrupciones se calculan "
+                        "a partir de la voz._"
+                    )
+
+                    examples = (
+                        sorted(str(p) for p in EXAMPLES_DIR.glob("*.wav"))
+                        if EXAMPLES_DIR.exists()
+                        else []
+                    )
+
+                    if examples:
+                        gr.Examples(
+                            examples=[[e] for e in examples],
+                            inputs=[audio],
+                            label="Audios de ejemplo"
+                        )
+
+                with gr.Column(scale=2):
+
+                    with gr.Tab("Resumen"):
+                        summary = gr.Markdown("Los resultados aparecerán aquí.")
+                        distribution = gr.Plot(label="Reparto")
+
+                    with gr.Tab("Línea de tiempo"):
+                        timeline = gr.Plot(label="Quién habla en cada momento")
+
+                    with gr.Tab("Transcripción"):
+                        transcript = gr.Dataframe(wrap=True, interactive=False)
+
+                    with gr.Tab("Interrupciones"):
+                        interrupts = gr.Dataframe(interactive=False)
+
+                    with gr.Tab("Descargas"):
+                        downloads = gr.Files(label="Excel, JSON y CSV de esta ejecución")
+
+            gr.Markdown(FOOTER_MD, elem_id="hive-footer")
+
+        # Lógica para alternar el menú de forma nativa y robusta con Gradio
+        def toggle_menu(is_open):
+            new_state = not is_open
+            btn_text = "✕ Cerrar" if new_state else "☰ Menú"
+            return new_state, gr.update(visible=new_state), btn_text
+
+        guide_state.click(
+            toggle_menu,
+            inputs=[guide_state],
+            outputs=[guide_state, sidebar, guide_state]
         )
-        with gr.Row():
-            with gr.Column(scale=1):
-                audio = gr.Audio(sources=["upload", "microphone"], type="filepath", label="Audio")
-                language = gr.Dropdown(list(LANGUAGES), value="Catalán", label="Idioma del audio")
-                trs = gr.File(file_types=[".trs", ".xml"], type="filepath",
-                              label="Referencia .trs (opcional, para evaluar el modelo)")
-                button = gr.Button("Analizar", variant="primary")
-                gr.Markdown(
-                    "_El idioma solo afecta a la transcripción (y al % de palabras). El tiempo de palabra, "
-                    "los turnos y las interrupciones salen de la voz, no del texto._"
-                )
-                examples = sorted(str(p) for p in EXAMPLES_DIR.glob("*.wav")) if EXAMPLES_DIR.exists() else []
-                if examples:
-                    gr.Examples(examples=[[e] for e in examples], inputs=[audio], label="Audios de ejemplo")
-            with gr.Column(scale=2):
-                with gr.Tab("Resumen"):
-                    summary = gr.Markdown("Los resultados aparecerán aquí.")
-                    distribution = gr.Plot(label="Reparto")
-                with gr.Tab("Línea de tiempo"):
-                    timeline = gr.Plot(label="Quién habla en cada momento")
-                with gr.Tab("Transcripción"):
-                    transcript = gr.Dataframe(wrap=True, interactive=False)
-                with gr.Tab("Interrupciones"):
-                    interrupts = gr.Dataframe(interactive=False)
-                with gr.Tab("Descargas"):
-                    downloads = gr.Files(label="Excel, JSON y CSV de esta ejecución")
 
         button.click(
             on_analyze,
             inputs=[audio, trs, language],
-            outputs=[summary, distribution, timeline, transcript, interrupts, downloads],
-            concurrency_limit=1,  # una sola GPU: los análisis se ponen en cola
+            outputs=[
+                summary,
+                distribution,
+                timeline,
+                transcript,
+                interrupts,
+                downloads,
+            ],
+            concurrency_limit=1,
         )
-    return demo
 
+    return demo
 
 if __name__ == "__main__":
     if os.environ.get("DEMO_PRELOAD", "1") == "1":
